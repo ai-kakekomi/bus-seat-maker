@@ -40,29 +40,45 @@
 
   .front-mark { background: #ddd !important; margin: 4mm 0 2mm; }
 
-  .bus { gap: 1.1mm; }
-  .bus-row { gap: 1.1mm; }
+  .bus { gap: 1.2mm; }
 
   .seat {
-    min-height: 12mm; padding: 3.4mm .5mm .5mm;
+    min-height: 11mm; padding: 3.2mm .5mm .5mm;
     font-size: 7.6pt; line-height: 1.15;
-    border: .4mm solid #333; box-shadow: none !important;
+    border: .25mm solid #666;
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
-  .seat .seat-sub { font-size: 6.6pt; }
+  .seat .seat-mark { font-size: 7.4pt; }
   .row-no { font-size: 5.6pt; }
 
-  /* マーカー色は枠線の太さでも区別できるようにする（白黒印刷対策） */
-  .seat.g0 { background: #fff6cf !important; border-color: #8a6d00 !important; }
-  .seat.g1 { background: #e2effc !important; border-color: #23527c !important; border-style: dashed; }
-  .seat.g2 { background: #fde8ed !important; border-color: #96324a !important; border-width: .8mm; }
-  .seat.g3 { background: #e6f6e6 !important; border-color: #2c6b2c !important; border-style: dotted; border-width: .8mm; }
-  .seat.g4 { background: #f0e8ff !important; border-color: #5b3e93 !important; border-style: double; border-width: 1mm; }
-  .seat.g5 { background: #ffeedd !important; border-color: #94540f !important; border-style: dashed; border-width: .8mm; }
+  .seat.g0 { background: #fff6cf !important; }
+  .seat.g1 { background: #e2effc !important; }
+  .seat.g2 { background: #fde8ed !important; }
+  .seat.g3 { background: #e6f6e6 !important; }
+  .seat.g4 { background: #f0e8ff !important; }
+  .seat.g5 { background: #ffeedd !important; }
 
   .seat.is-crew {
     background: #d8d8d8 !important; border-style: dashed !important; color: #333;
   }
+
+  /* グループを囲む枠。白黒印刷でも見分けられるよう線の種類を変える */
+  .block {
+    margin: -.7mm; border-width: .7mm; border-radius: 2mm;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .block-label {
+    background: #fff !important; font-size: 8.6pt; padding: .2mm 1mm;
+  }
+  .block-count { font-size: 9.2pt; }
+  .block.c0 { border-color: #8a6d00 !important; border-style: solid; }
+  .block.c1 { border-color: #23527c !important; border-style: dashed; }
+  .block.c2 { border-color: #96324a !important; border-style: solid; border-width: 1mm; }
+  .block.c3 { border-color: #2c6b2c !important; border-style: dotted; border-width: 1mm; }
+  .block.c4 { border-color: #5b3e93 !important; border-style: double; border-width: 1.2mm; }
+  .block.c5 { border-color: #94540f !important; border-style: dashed; border-width: 1mm; }
+  .block-free { border: .7mm dashed #555 !important; }
+  .block-free .block-label { font-size: 10pt; }
 
   .legend { font-size: 7.5pt; margin-top: 2mm; }
   .legend span { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

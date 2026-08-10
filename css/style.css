@@ -179,36 +179,66 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
   text-align: center; font-size: .85rem; color: var(--fg-muted); margin-top: .4rem;
 }
 
-.bus { display: flex; flex-direction: column; gap: .3rem; }
-.bus-row { display: grid; grid-template-columns: 1fr 1fr 1.1rem 1fr 1fr; gap: .3rem; align-items: stretch; }
-.bus-row.back-row { grid-template-columns: repeat(5, 1fr); }
-.aisle { }
+/* 5本の縦すじ（左2席・通路・右2席）のマス目。最後部列の中央席は通路のすじを使います */
+.bus {
+  display: grid;
+  grid-template-columns: 1fr 1fr .62fr 1fr 1fr;
+  gap: .34rem;
+  align-items: stretch;
+}
 .row-no {
   position: absolute; left: .18rem; top: .05rem; font-size: .62rem; color: #8a969e;
 }
 
 .seat {
-  position: relative; border: 1px solid var(--line); border-radius: 6px;
-  background: #fff; min-height: 3.1rem; padding: .85rem .2rem .2rem;
-  text-align: center; font-size: .78rem; line-height: 1.25;
+  position: relative; border: 1px solid var(--line); border-radius: 5px;
+  background: #fff; min-height: 2.6rem; padding: .8rem .2rem .2rem;
+  text-align: center; font-size: .78rem; line-height: 1.2;
   cursor: pointer; overflow: hidden;
 }
-.seat:hover { outline: 2px solid var(--accent); }
+.seat:hover { outline: 2px solid var(--accent); z-index: 4; }
 .seat.is-crew {
   background: #e3e7ea; color: #6b767d; cursor: default; border-style: dashed;
 }
 .seat.is-crew:hover { outline: none; }
-.seat.is-empty { color: #a8b2b8; }
-.seat.is-selected { outline: 3px solid var(--error); }
+.seat.is-empty { color: #aab4ba; }
+.seat.is-selected { outline: 3px solid var(--error); z-index: 4; }
 .seat .seat-label { font-weight: 700; display: block; }
-.seat .seat-sub { display: block; font-size: .7rem; color: var(--fg-muted); }
+.seat .seat-mark { display: block; font-size: .82rem; font-weight: 700; }
 
-.seat.g0 { background: var(--c0-bg); border-color: var(--c0-line); box-shadow: inset 0 0 0 2px var(--c0-line); }
-.seat.g1 { background: var(--c1-bg); border-color: var(--c1-line); box-shadow: inset 0 0 0 2px var(--c1-line); }
-.seat.g2 { background: var(--c2-bg); border-color: var(--c2-line); box-shadow: inset 0 0 0 2px var(--c2-line); }
-.seat.g3 { background: var(--c3-bg); border-color: var(--c3-line); box-shadow: inset 0 0 0 2px var(--c3-line); }
-.seat.g4 { background: var(--c4-bg); border-color: var(--c4-line); box-shadow: inset 0 0 0 2px var(--c4-line); }
-.seat.g5 { background: var(--c5-bg); border-color: var(--c5-line); box-shadow: inset 0 0 0 2px var(--c5-line); }
+.seat.g0 { background: var(--c0-bg); border-color: var(--c0-line); }
+.seat.g1 { background: var(--c1-bg); border-color: var(--c1-line); }
+.seat.g2 { background: var(--c2-bg); border-color: var(--c2-line); }
+.seat.g3 { background: var(--c3-bg); border-color: var(--c3-line); }
+.seat.g4 { background: var(--c4-bg); border-color: var(--c4-line); }
+.seat.g5 { background: var(--c5-bg); border-color: var(--c5-line); }
+
+/* グループを囲む大きな四角。手書きのマーカー囲みの代わりです */
+.block {
+  position: relative; pointer-events: none; z-index: 3;
+  margin: -.19rem; border: 3px solid var(--line); border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+}
+.block-label {
+  background: rgba(255, 255, 255, .88);
+  border-radius: 6px; padding: .05rem .45rem;
+  font-weight: 700; font-size: .9rem; line-height: 1.3;
+  text-align: center; max-width: 96%;
+}
+.block-name { display: block; }
+.block-count { display: block; font-size: .95rem; }
+
+.block.c0 { border-color: var(--c0-line); }
+.block.c1 { border-color: var(--c1-line); }
+.block.c2 { border-color: var(--c2-line); }
+.block.c3 { border-color: var(--c3-line); }
+.block.c4 { border-color: var(--c4-line); }
+.block.c5 { border-color: var(--c5-line); }
+
+.block-free {
+  border: 3px dashed #7b878e; color: #4e585e;
+}
+.block-free .block-label { font-size: 1rem; letter-spacing: .2em; }
 
 .legend { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .7rem; font-size: .8rem; }
 .legend span {

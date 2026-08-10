@@ -114,13 +114,12 @@
 
       body.appendChild(fieldNumber('人数', g.size, function (v) { setSize(g, v); changed(); }));
 
-      var surname = fieldText('名字（任意）', g.surname, '例：山田', function (v) { g.surname = v; changed(); });
-      body.appendChild(surname);
-
-      if (labels[i].needsFullName) {
-        body.appendChild(fieldText('フルネーム', g.fullName, '例：山田太郎', function (v) { g.fullName = v; changed(); }));
-      } else if (g.fullName) {
-        body.appendChild(fieldText('フルネーム', g.fullName, '', function (v) { g.fullName = v; changed(); }));
+      // お名前の欄は「お名前を出す」にしたときだけ出す（入力済みの値は消えません）
+      if (state.useRealName) {
+        body.appendChild(fieldText('名字', g.surname, '例：山田', function (v) { g.surname = v; changed(); }));
+        if (labels[i].needsFullName || g.fullName) {
+          body.appendChild(fieldText('フルネーム', g.fullName, '例：山田太郎', function (v) { g.fullName = v; changed(); }));
+        }
       }
 
       var frontWrap = el('label', 'toggle-line');
@@ -298,35 +297,66 @@
 
       var note = el('p', 'print-note');
       note.textContent = '灰色の席は業務席（乗務員・添乗員）です。' +
-        (day.reversed ? '　この日は前後を入れ替えています（前のお席をご希望のグループを除く）。' : '');
+        (day.shifted ? '　この日は前から並べる順番をずらしています（前のお席をご希望のグループを除く）。' : '');
       sheet.appendChild(note);
 
       box.appendChild(sheet);
     });
   }
 
+  /**
+   * 座席表は5本の縦すじ（左2席・通路・右2席）のマス目で描きます。
+   * グループを囲む四角（ブロック）は、そのマス目にまたがる枠として上に重ねます。
+   */
   function busTable(day, dayIndex, labels) {
     var layout = result.layout;
     var wrap = el('div', 'bus');
 
-    for (var r = 1; r <= layout.rows; r++) {
-      var isBack = r === layout.lastRow;
-      var row = el('div', 'bus-row' + (isBack ? ' back-row' : ''));
-      var seats = layout.seats.filter(function (s) { return s.row === r; });
+    // 座席のマス
+    layout.seats.forEach(function (seat) {
+      var cell = seatCell(seat, day, dayIndex);
+      cell.style.gridRow = String(seat.row);
+      cell.style.gridColumn = String(S.trackOf(layout, seat.row, seat.col));
+      wrap.appendChild(cell);
+    });
 
-      seats.forEach(function (seat, idx) {
-        if (!isBack && idx === 2) row.appendChild(el('div', 'aisle'));
-        row.appendChild(seatCell(seat, day, dayIndex, labels, r));
-      });
-      wrap.appendChild(row);
+    // グループを囲む四角（1グループにつき1つ。分かれたときだけ複数）
+    var labelDone = {};
+    (day.blocks || []).forEach(function (b) {
+      var color = result.colors[b.groupId];
+      var box = el('div', 'block c' + color);
+      box.style.gridRow = b.row0 + ' / ' + (b.row1 + 1);
+      box.style.gridColumn = b.trackStart + ' / ' + (b.trackEnd + 1);
+
+      // ラベルはブロックの中に1回だけ
+      if (!labelDone[b.groupId]) {
+        labelDone[b.groupId] = true;
+        var l = labels[b.groupId];
+        if (l) {
+          var tag = el('span', 'block-label');
+          tag.appendChild(el('span', 'block-name', l.label));
+          tag.appendChild(el('span', 'block-count', l.sizeMark + '名'));
+          box.appendChild(tag);
+        }
+      }
+      wrap.appendChild(box);
+    });
+
+    // 使われていない後方は、まとめて「自由席」
+    if (day.freeArea) {
+      var free = el('div', 'block block-free');
+      free.style.gridRow = day.freeArea.row0 + ' / ' + (day.freeArea.row1 + 1);
+      free.style.gridColumn = '1 / 6';
+      free.appendChild(el('span', 'block-label', '自由席'));
+      wrap.appendChild(free);
     }
+
     return wrap;
   }
 
-  function seatCell(seat, day, dayIndex, labels, rowNo) {
+  function seatCell(seat, day, dayIndex) {
     var cell = el('div', 'seat');
-    var no = el('span', 'row-no', rowNo + '-' + seat.col);
-    cell.appendChild(no);
+    cell.appendChild(el('span', 'row-no', seat.row + '-' + seat.col));
 
     if (seat.isCrew) {
       cell.className += ' is-crew';
@@ -335,18 +365,18 @@
     }
 
     var p = day.placements[seat.id];
-    if (!p) {
-      cell.className += ' is-empty';
-      cell.appendChild(el('span', 'seat-label', '空席'));
-    } else {
-      var l = labels[p.groupId];
+    var reservedBy = (day.reserved || {})[seat.id];
+
+    if (p) {
       cell.className += ' g' + result.colors[p.groupId];
-      cell.appendChild(el('span', 'seat-label', l ? l.label : ''));
-      var sub = [];
-      if (l) sub.push(l.sizeMark + '名');
-      if (p.gender === 'male') sub.push('男');
-      if (p.gender === 'female') sub.push('女');
-      cell.appendChild(el('span', 'seat-sub', sub.join('・')));
+      var mark = p.gender === 'male' ? '男' : (p.gender === 'female' ? '女' : '');
+      cell.appendChild(el('span', 'seat-mark', mark));
+    } else if (reservedBy) {
+      cell.className += ' g' + result.colors[reservedBy] + ' is-empty';
+      cell.appendChild(el('span', 'seat-mark', '空'));
+    } else {
+      cell.className += ' is-empty';
+      cell.appendChild(el('span', 'seat-mark', '空'));
     }
 
     if (selectedSeat && selectedSeat.dayIndex === dayIndex && selectedSeat.seatId === seat.id) {
@@ -365,7 +395,7 @@
     } else if (selectedSeat.dayIndex !== dayIndex) {
       selectedSeat = { dayIndex: dayIndex, seatId: seatId };
     } else {
-      S.swapSeats(result.days[dayIndex], selectedSeat.seatId, seatId);
+      S.swapSeats(result.layout, result.days[dayIndex], selectedSeat.seatId, seatId);
       selectedSeat = null;
     }
     renderSheets();
