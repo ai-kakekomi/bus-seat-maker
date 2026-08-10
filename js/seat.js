@@ -1027,11 +1027,26 @@
    * 目標の前後も試して、いちばん分かれにくい開始位置を選びます。
    * （公平さの厳密さより、グループが離れ離れにならないことを優先）
    */
-  /** その日の座席の並びを、見分けるための文字列にする（前の日と同じかどうかの判定用） */
-  function daySignature(day) {
-    return Object.keys(day.placements).sort().map(function (sid) {
-      return sid + ':' + day.placements[sid].groupId;
-    }).join(',');
+  /** その日、どの席にどのグループが座ったか（前の日との比べもの用） */
+  function daySeatMap(day) {
+    var map = {};
+    Object.keys(day.placements).forEach(function (sid) {
+      map[sid] = day.placements[sid].groupId;
+    });
+    return map;
+  }
+
+  /**
+   * 2つの日の「似ぐあい」（0〜1）。
+   * 同じ席に同じグループが残っている割合です。
+   * 1人だけ動かして「別の並びです」と言えないよう、完全一致ではなく割合で見ます。
+   */
+  function daySimilarity(mapA, mapB) {
+    var keys = Object.keys(mapA);
+    if (keys.length === 0) return 0;
+    var same = 0;
+    keys.forEach(function (sid) { if (mapA[sid] === mapB[sid]) same++; });
+    return same / keys.length;
   }
 
   function buildBestDay(layout, groups, opt, target, rotatingCount) {
@@ -1044,14 +1059,16 @@
       return repackSplits(layout, groups, opt, day);
     }
 
-    // 前の日と同じ並びは避けたい（席替えの意味がなくなるため）。
-    // ただし「分かれてしまう」ほうがずっと重い問題なので、重みは小さくしています。
-    var seenDays = opt.previousSignatures || [];
+    // 前の日と似すぎた並びは避けたい（席替えの意味がなくなるため）。
+    // ただし「分かれてしまう（分割＝100点）」ほうがずっと重い問題なので、それよりは軽い扱いです。
+    var seenMaps = opt.previousSeatMaps || [];
     function evaluate(day, startIndex) {
       var sc = dayScore(groups, day);
-      // 前の日とそっくり同じ並びは、席替えの意味がなくなるので大きく避ける。
-      // ただし「離れ離れ（分割 ＝ 100点）」よりは軽い扱いにします。
-      if (seenDays.indexOf(daySignature(day)) >= 0) sc += 40;
+      var mine = daySeatMap(day);
+      var sim = 0;
+      seenMaps.forEach(function (m) { sim = Math.max(sim, daySimilarity(mine, m)); });
+      // 半分より多くの席がそのままなら、似ぐあいに応じて減点していく
+      if (sim > 0.5) sc += (sim - 0.5) * 160;
       var dist = Math.min(
         Math.abs(startIndex - target),
         rotatingCount - Math.abs(startIndex - target)
@@ -1887,7 +1904,7 @@
       var day = buildBestDay(layout, groups, {
         frontStartIndex: startIndexForDay(frontRotating, d, dayCount),
         sharing: sharing,
-        previousSignatures: days.map(daySignature)
+        previousSeatMaps: days.map(daySeatMap)
       }, startIndexForDay(rotating, d, dayCount), rotating.length);
       day.dayIndex = d;
       // 自動で割り当てた直後の状態を「もともとの注意」として控えておく
@@ -1960,6 +1977,8 @@
     shouldAvoidSharing: shouldAvoidSharing,
     startIndexForDay: startIndexForDay,
     dayScore: dayScore,
+    daySeatMap: daySeatMap,
+    daySimilarity: daySimilarity,
     assignDay: assignDay,
     assign: assign,
     resolveLabels: resolveLabels,

@@ -153,6 +153,10 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 .color-3 { border-left-color: var(--c3-line); }
 .color-4 { border-left-color: var(--c4-line); }
 .color-5 { border-left-color: var(--c5-line); }
+.color-6 { border-left-color: var(--c6-line); }
+.color-7 { border-left-color: var(--c7-line); }
+.color-8 { border-left-color: var(--c8-line); }
+.color-9 { border-left-color: var(--c9-line); }
 
 /* ---------- 注意メッセージ ---------- */
 .callout {
@@ -301,6 +305,15 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 }
 .block-name { display: inline; }
 .block-count { display: inline; margin-left: .15rem; font-size: .95rem; }
+
+/* 1席ぶんしか幅がないブロック（おひとり様など）は、小さめ・2行にして必ず読めるようにする */
+.blk-label-wrap.is-narrow { padding-bottom: 1rem; }
+.block-label.is-narrow {
+  font-size: .66rem; line-height: 1.12; padding: 0 .1rem;
+  white-space: normal; word-break: break-all; max-width: 100%;
+}
+.block-label.is-narrow .block-name { display: block; }
+.block-label.is-narrow .block-count { display: block; margin-left: 0; font-size: .74rem; }
 
 .blk-free {
   position: relative; pointer-events: none; z-index: 3;

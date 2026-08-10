@@ -460,10 +460,14 @@
         labelDone[b.groupId] = true;
         var l = labels[b.groupId];
         if (l) {
-          var wrapL = el('div', 'blk-label-wrap' + (b.isSplit ? ' is-split' : ''));
+          // 1席ぶんしか幅がないブロックは、文字を小さくして必ず読めるようにする
+          var narrow = (b.label.trackEnd - b.label.trackStart) === 0;
+          var wrapL = el('div', 'blk-label-wrap' + (b.isSplit ? ' is-split' : '') +
+            (narrow ? ' is-narrow' : ''));
           wrapL.style.gridRow = b.label.row0 + ' / ' + (b.label.row1 + 1);
           wrapL.style.gridColumn = b.label.trackStart + ' / ' + (b.label.trackEnd + 1);
-          var tag = el('span', 'block-label' + (b.isSplit ? ' is-split' : ''));
+          var tag = el('span', 'block-label' + (b.isSplit ? ' is-split' : '') +
+            (narrow ? ' is-narrow' : ''));
           tag.appendChild(el('span', 'block-name', l.label));
           tag.appendChild(el('span', 'block-count', l.sizeMark + '名'));
           if (b.isSplit) tag.appendChild(el('span', 'block-split-mark', '席が' + b.pieces + 'か所に分かれています'));
@@ -661,9 +665,9 @@
     var g = sampleGroup;
     if (kind === 'full') {
       return {
-        tourName: '日帰り信州そば街道めぐり',
+        tourName: '信州そば街道めぐり3日間',
         busNo: '1号車',
-        days: 1,
+        days: 3,
         startDate: '',
         layoutType: '11x45',
         useRealName: false,

@@ -138,6 +138,9 @@
     font-size: 8.4pt; padding: 0 .8mm;
   }
   .block-count { font-size: 9pt; }
+  .blk-label-wrap.is-narrow { padding-bottom: 3.4mm; }
+  .block-label.is-narrow { font-size: 6.6pt; line-height: 1.1; }
+  .block-label.is-narrow .block-count { font-size: 7.4pt; }
   .blk-free { border: .7mm dashed #555 !important; margin: -.7mm; }
   .blk-free .block-label { font-size: 10pt; }
   .seat.is-picked-seat { box-shadow: none !important; }

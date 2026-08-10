@@ -1433,6 +1433,57 @@ test('同じ並びを避けることより、離れ離れにしないことを�
   });
 });
 
+test('日ごとの並びは「似ぐあい」で見る（1人動かしただけでは別物にしない）', function () {
+  var r = S.assign({ layoutType: '11x45', groups: fullHouseGroups(), days: 3 });
+  var maps = r.days.map(S.daySeatMap);
+
+  // となりの日どうしは、大きく入れ替わっていること
+  eq(S.daySimilarity(maps[0], maps[1]) < 0.5, true,
+    '1日目と2日目が似すぎている（' + S.daySimilarity(maps[0], maps[1]).toFixed(2) + '）');
+  eq(S.daySimilarity(maps[1], maps[2]) < 0.5, true,
+    '2日目と3日目が似すぎている（' + S.daySimilarity(maps[1], maps[2]).toFixed(2) + '）');
+
+  // ほとんどの組が、日ごとに実際に席を移っていること
+  [[0, 1], [1, 2]].forEach(function (pair) {
+    var stay = 0;
+    r.groups.forEach(function (g) {
+      var a = r.days[pair[0]].seatsOfGroup[g.id].slice().sort().join(',');
+      var b = r.days[pair[1]].seatsOfGroup[g.id].slice().sort().join(',');
+      if (a === b) stay++;
+    });
+    ok(stay <= r.groups.length / 4,
+      (pair[0] + 1) + '日目と' + (pair[1] + 1) + '日目で ' + stay + '組が同じ席のまま');
+  });
+});
+
+test('似ぐあいの計算（1席だけ違っても「ほぼ同じ」と分かる）', function () {
+  var a = { 'r1-1': 'g1', 'r1-2': 'g1', 'r2-1': 'g2', 'r2-2': 'g2' };
+  var b = { 'r1-1': 'g1', 'r1-2': 'g1', 'r2-1': 'g2', 'r2-2': 'g3' };
+  eq(S.daySimilarity(a, a), 1, 'まったく同じ');
+  eq(S.daySimilarity(a, b), 0.75, '1席だけ違う');
+  eq(S.daySimilarity(a, {}), 0, 'まったく違う');
+});
+
+test('前席オプションでない組も、空いていれば前3列に座れる', function () {
+  // 前席オプションが1組だけなら、前3列の残りは通常のグループが使ってよい
+  var groups = [group('f1', 2, { frontOption: true }), group('g1', 1), group('g2', 4), group('g3', 4)];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  var day = r.days[0];
+
+  // 前席オプションの組は前3列に入っている
+  day.seatsOfGroup['f1'].forEach(function (sid) {
+    ok(seatRow(sid) <= 3, '前席オプションが前3列を出た');
+  });
+  // 前3列に空きがあれば、ほかの組が使ってよい（前から詰める仕様）
+  var frontOthers = [];
+  ['g1', 'g2', 'g3'].forEach(function (id) {
+    day.seatsOfGroup[id].forEach(function (sid) { if (seatRow(sid) <= 3) frontOthers.push(sid); });
+  });
+  ok(frontOthers.length > 0, '前3列が空いているのに誰も使っていない');
+  // それでも注意は出ない（決まりに反していないため）
+  eq(S.inspectDay(r.layout, r.groups, day).length, 0, '注意が出ている');
+});
+
 console.log('\n--- 4の1の3. 分かれた席の強調表示 ---');
 
 test('分かれたグループは、どの断片にも印が付く', function () {
