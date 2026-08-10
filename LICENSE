@@ -1,0 +1,44 @@
+MIT License
+
+Copyright (c) 2026 AIかけこみ寺 / AI Kakekomi-dera
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------
+座席表の作成に関する注意（重要）
+--------------------------------------------------------------------------
+
+本ソフトウェアが出力する座席表は下書きであり、実在の車両の座席配置を
+保証するものではありません。本ソフトウェアの座席図は一般的な大型観光バスを
+想定した簡略図であり、サロン席・補助席・車いす対応席等の特殊な配置には
+対応していません。
+
+男女の別・人数・オプションの有無は入力された内容をそのまま扱います。
+入力の誤りは検出できません。
+
+実際の車両の座席配置、お客様のご要望、社内規程との突き合わせは、
+本ソフトウェアの利用者の責任において行ってください。
+
+--------------------------------------------------------------------------
+個人情報の取り扱いについて
+--------------------------------------------------------------------------
+
+本ソフトウェアは完全にローカルで動作し、入力内容を外部に送信しません。
+ただし「保存ファイル」にはお客様の氏名等が含まれる場合があります。
+その保管・共有・廃棄は、利用者の責任において適切に行ってください。

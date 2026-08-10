@@ -1,0 +1,74 @@
+/* ============================================================
+ * 印刷用スタイル
+ * A4縦・1日ぶんで1ページに収まるようにする。
+ * 入力欄・ボタン・ヘッダー等は印刷しない。
+ * ============================================================ */
+
+@page {
+  size: A4 portrait;
+  margin: 12mm 12mm 10mm;
+}
+
+@media print {
+  html { font-size: 12.5px; }
+  body { background: #fff; padding: 0; }
+
+  .site-header,
+  .site-nav,
+  .notice-bar,
+  .site-footer,
+  .no-print,
+  .btn,
+  .btn-row,
+  .swap-hint,
+  #input-pane { display: none !important; }
+
+  .wrap { max-width: none; padding: 0; margin: 0; }
+  .layout { display: block; margin: 0; }
+
+  #sheets { display: block; }
+
+  .sheet {
+    border: none; border-radius: 0; padding: 0; margin: 0;
+    page-break-after: always; break-after: page;
+  }
+  .sheet:last-child { page-break-after: auto; break-after: auto; }
+
+  .sheet-head { border-bottom: 2px solid #000; }
+  .sheet-title { font-size: 15pt; }
+  .sheet-meta { color: #000; font-size: 10pt; }
+
+  .front-mark { background: #ddd !important; margin: 4mm 0 2mm; }
+
+  .bus { gap: 1.1mm; }
+  .bus-row { gap: 1.1mm; }
+
+  .seat {
+    min-height: 12mm; padding: 3.4mm .5mm .5mm;
+    font-size: 7.6pt; line-height: 1.15;
+    border: .4mm solid #333; box-shadow: none !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .seat .seat-sub { font-size: 6.6pt; }
+  .row-no { font-size: 5.6pt; }
+
+  /* マーカー色は枠線の太さでも区別できるようにする（白黒印刷対策） */
+  .seat.g0 { background: #fff6cf !important; border-color: #8a6d00 !important; }
+  .seat.g1 { background: #e2effc !important; border-color: #23527c !important; border-style: dashed; }
+  .seat.g2 { background: #fde8ed !important; border-color: #96324a !important; border-width: .8mm; }
+  .seat.g3 { background: #e6f6e6 !important; border-color: #2c6b2c !important; border-style: dotted; border-width: .8mm; }
+  .seat.g4 { background: #f0e8ff !important; border-color: #5b3e93 !important; border-style: double; border-width: 1mm; }
+  .seat.g5 { background: #ffeedd !important; border-color: #94540f !important; border-style: dashed; border-width: .8mm; }
+
+  .seat.is-crew {
+    background: #d8d8d8 !important; border-style: dashed !important; color: #333;
+  }
+
+  .legend { font-size: 7.5pt; margin-top: 2mm; }
+  .legend span { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  .print-note { display: block !important; font-size: 8pt; margin-top: 3mm; color: #333; }
+  a { text-decoration: none; color: #000; }
+}
+
+.print-note { display: none; }

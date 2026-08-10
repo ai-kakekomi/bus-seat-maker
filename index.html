@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>バス座席表メーカー</title>
+<meta name="description" content="バスツアーの添乗員向け。申し込みグループを入れるだけで、座席表を自動で作って印刷できる無料ツールです。">
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/print.css" media="print">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <div>
+      <h1>バス座席表メーカー</h1>
+      <p class="tagline">申し込みの順に入れるだけ。座席表を自動で作って、そのまま印刷できます</p>
+    </div>
+    <nav class="site-nav">
+      <a href="manual.html">使い方</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap notice-bar">
+  <p>
+    <strong>入力した内容は、この端末のブラウザの中だけに保存されます。</strong>
+    インターネットに送信することは一切ありません。お客様のお名前や性別が外に出ることはありません。
+  </p>
+</div>
+
+<div class="wrap">
+<div class="layout">
+
+  <!-- ================= 入力側 ================= -->
+  <div id="input-pane">
+
+    <section class="card">
+      <h2>1. ツアーの情報</h2>
+      <div class="field-grid">
+        <div class="field">
+          <label for="tour-name">ツアー名</label>
+          <input type="text" id="tour-name" placeholder="例：信州紅葉めぐり2日間">
+        </div>
+        <div class="field">
+          <label for="bus-no">号車</label>
+          <input type="text" id="bus-no" placeholder="例：1号車">
+        </div>
+        <div class="field">
+          <label for="tour-days">日数</label>
+          <input type="number" id="tour-days" min="1" max="10" value="1">
+          <span class="help">日数ぶんの座席表を作ります</span>
+        </div>
+        <div class="field">
+          <label for="start-date">出発日</label>
+          <input type="date" id="start-date">
+          <span class="help">2日目以降は自動で翌日になります</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>2. バスの座席の形</h2>
+      <div class="field-grid">
+        <div class="field">
+          <label for="layout-type">座席の形</label>
+          <select id="layout-type">
+            <option value="11x45">11列45席（最後部だけ5席）</option>
+            <option value="12x49">12列49席（最後部だけ5席）</option>
+          </select>
+        </div>
+      </div>
+      <p class="help" id="layout-info"></p>
+      <p class="callout">
+        いちばん前の<strong>運転席側（右）2席は「業務席」</strong>として、お客様の配置から外しています。
+        座席表では灰色で表示されます。
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>3. お名前の出し方</h2>
+      <label class="toggle-line">
+        <input type="checkbox" id="use-real-name">
+        <span>座席表にお客様のお名前を出す</span>
+      </label>
+      <p class="help">
+        ふだんは<strong>チェックを外したまま</strong>をおすすめします。
+        外しているときは「お客様①」「お客様②」のように、申し込み順の番号だけを印刷します。
+        紙は落とすことがあります。お名前を印刷するかどうかは、会社の決まりに合わせて判断してください。
+      </p>
+      <p class="help">
+        チェックを入れると<strong>名字＋様</strong>で表示します。
+        同じ名字のお客様が複数いるときだけ、自動でフルネームに切り替わります。
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>4. 申し込みグループ</h2>
+      <p class="help">
+        申し込みを受けた順に上から並べてください。「↑」「↓」で順番を入れ替えられます。
+        <strong>並び順がそのまま席順（前から）の優先順位</strong>になります。
+      </p>
+      <ul class="group-list" id="group-list"></ul>
+      <div class="btn-row">
+        <button type="button" class="btn btn-primary" id="add-group">＋ グループを追加</button>
+        <button type="button" class="btn" id="clear-groups">グループを全部消す</button>
+      </div>
+      <p class="help" id="people-info"></p>
+    </section>
+
+    <section class="card">
+      <h2>5. 保存と持ち出し</h2>
+      <p class="help">
+        入力した内容は自動でこの端末に残ります。別のパソコンでも続きをしたいときは、保存ファイルを作ってください。
+      </p>
+      <div class="btn-row">
+        <button type="button" class="btn" id="save-file">保存ファイルを作る</button>
+        <button type="button" class="btn" id="load-file-btn">保存ファイルを読み込む</button>
+        <input type="file" id="load-file" accept=".json,application/json" style="display:none">
+        <button type="button" class="btn" id="load-sample">見本を入れてみる</button>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ================= 座席表側 ================= -->
+  <div id="output-pane">
+
+    <section class="card no-print">
+      <h2>座席表</h2>
+      <div class="btn-row">
+        <button type="button" class="btn btn-primary" id="assign">自動で席を決める</button>
+        <button type="button" class="btn" id="print">印刷する（PDFで保存もできます）</button>
+      </div>
+      <p class="swap-hint">
+        <strong>手で直せます。</strong>入れ替えたい席を1つ押して、次に入れ替え先の席を押すと、2つの席が入れ替わります。
+        空いている席とも入れ替えられます。押し間違えたら、同じ席をもう一度押すと取り消せます。
+      </p>
+      <p class="help">
+        入力を変えると自動で決め直します。そのとき<strong>手で直した内容は消えます</strong>ので、
+        手直しは最後にしてください。
+      </p>
+      <div id="messages"></div>
+    </section>
+
+    <div id="sheets"></div>
+
+  </div>
+
+</div>
+</div>
+
+<footer class="site-footer no-print">
+  <div class="wrap">
+    <p class="disclaimer">
+      本ツールは座席表の下書きを作る補助です。実際の車両の座席配置・お客様のご希望との突き合わせは、必ずご自身で確認してください。
+    </p>
+    <p class="footer-meta">
+      バス座席表メーカー ／ 非営利団体 AIかけこみ寺 ／ ライセンス MIT ／ 無保証 ／
+      <a href="manual.html">使い方</a>
+    </p>
+  </div>
+</footer>
+
+<script src="js/seat.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
