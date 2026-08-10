@@ -112,34 +112,32 @@
   }
   .block-split-mark { font-size: 6.6pt; }
 
-  .blk.c0 { border-color: #8a6d00 !important; border-style: solid; }
-  .blk.c1 { border-color: #23527c !important; border-style: dashed; }
-  .blk.c2 { border-color: #96324a !important; border-style: solid; }
-  .blk.c3 { border-color: #2c6b2c !important; border-style: dotted; }
-  .blk.c4 { border-color: #5b3e93 !important; border-style: double; }
-  .blk.c5 { border-color: #94540f !important; border-style: dashed; }
-  .blk.c6 { border-color: #12645a !important; border-style: solid; }
-  .blk.c7 { border-color: #6d452c !important; border-style: dotted; }
-  .blk.c8 { border-color: #566218 !important; border-style: dashed; }
-  .blk.c9 { border-color: #832e76 !important; border-style: double; }
-  .blk.c2.bt, .blk.c2.br, .blk.c2.bb, .blk.c2.bl { border-width: 1mm; }
-  .blk.c3.bt, .blk.c3.br, .blk.c3.bb, .blk.c3.bl { border-width: 1mm; }
-  .blk.c4.bt, .blk.c4.br, .blk.c4.bb, .blk.c4.bl { border-width: 1.2mm; }
-  .blk.c5.bt, .blk.c5.br, .blk.c5.bb, .blk.c5.bl { border-width: 1mm; }
-  .blk.c6.bt, .blk.c6.br, .blk.c6.bb, .blk.c6.bl { border-width: 1.2mm; }
-  .blk.c7.bt, .blk.c7.br, .blk.c7.bb, .blk.c7.bl { border-width: 1.2mm; }
-  .blk.c8.bt, .blk.c8.br, .blk.c8.bb, .blk.c8.bl { border-width: .5mm; }
-  .blk.c9.bt, .blk.c9.br, .blk.c9.bb, .blk.c9.bl { border-width: 1.4mm; }
+  /* グループ枠は全色とも実線・同じ太さ。区別は色でつけます
+     （線の種類を変えると、かえって分かりにくいという現場の声のため） */
+  .blk.c0 { border-color: #8a6d00 !important; }
+  .blk.c1 { border-color: #23527c !important; }
+  .blk.c2 { border-color: #96324a !important; }
+  .blk.c3 { border-color: #2c6b2c !important; }
+  .blk.c4 { border-color: #5b3e93 !important; }
+  .blk.c5 { border-color: #94540f !important; }
+  .blk.c6 { border-color: #12645a !important; }
+  .blk.c7 { border-color: #6d452c !important; }
+  .blk.c8 { border-color: #566218 !important; }
+  .blk.c9 { border-color: #832e76 !important; }
 
-  .blk-label-wrap { padding-bottom: 4.2mm; }
   .block-label {
     background: rgba(255, 255, 255, .8) !important;
     font-size: 8.4pt; padding: 0 .8mm;
   }
   .block-count { font-size: 9pt; }
   .blk-label-wrap.is-narrow { padding-bottom: 3.4mm; }
-  .block-label.is-narrow { font-size: 6.6pt; line-height: 1.1; }
-  .block-label.is-narrow .block-count { font-size: 7.4pt; }
+  .block-label.is-narrow { font-size: 7pt; line-height: 1.1; overflow: visible; }
+  .block-label.is-narrow.is-long { font-size: 6.2pt; }
+  .block-label.is-narrow .block-name {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+  }
+  .block-label.is-narrow.has-count .block-name { -webkit-line-clamp: 2; }
+  .block-label.is-narrow .block-count { font-size: 7pt; }
   .blk-free { border: .7mm dashed #555 !important; margin: -.7mm; }
   .blk-free .block-label { font-size: 10pt; }
 

@@ -5,6 +5,7 @@
 'use strict';
 
 var path = require('path');
+var fs = require('fs');
 var S = require(path.join(__dirname, '..', 'js', 'seat.js'));
 
 var 通過 = 0, 失敗 = 0;
@@ -1190,6 +1191,90 @@ test('最後部まで埋まっていれば自由席は出ない', function () {
   groups.push(group('last', 1));
   var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
   eq(r.days[0].freeArea, null, '自由席の枠');
+});
+
+console.log('\n--- 4の1の4. 1席ブロックのラベルが枠に収まるか ---');
+
+// CSSで決めている寸法（css/style.css・css/print.css と揃えること）
+var LABEL_STYLE = {
+  screen: { cellW: 4.6 * 17, cellH: 3.4 * 17, padBottom: 1.0 * 17, pad: 0.1 * 17,
+            fsBase: 0.66 * 17, fsLong: 0.58 * 17, fsCount: 0.68 * 17, lh: 1.12 },
+  print:  { cellW: 30, cellH: 13, padBottom: 3.4, pad: 0.8,
+            fsBase: 7 * 0.3528, fsLong: 6.2 * 0.3528, fsCount: 7 * 0.3528, lh: 1.1 }
+};
+
+// 全角はフォントサイズぶん、英数はおよそ0.56倍の幅として見積もる
+function textWidth(ch, fs) {
+  return /[　-鿿＀-￯]/.test(ch) ? fs : fs * 0.56;
+}
+function labelFits(name, hasCount, st) {
+  var isLong = name.length > 12;
+  var fs = isLong ? st.fsLong : st.fsBase;
+  var usableW = st.cellW - st.pad * 2;
+  var lines = 1, cur = 0;
+  for (var i = 0; i < name.length; i++) {
+    var w = textWidth(name[i], fs);
+    if (cur + w > usableW) { lines++; cur = w; } else { cur += w; }
+  }
+  var clamp = hasCount ? 2 : 3;
+  if (lines > clamp) return { ok: false, why: '行数 ' + lines + ' が上限 ' + clamp + ' を超える' };
+  var h = lines * fs * st.lh + (hasCount ? st.fsCount * st.lh : 0);
+  var usableH = st.cellH - st.padBottom;
+  if (h > usableH) return { ok: false, why: '高さ ' + h.toFixed(1) + ' > ' + usableH.toFixed(1) };
+  return { ok: true, lines: lines };
+}
+
+test('1席ブロックのラベルは、長い名字でも枠からはみ出さない', function () {
+  var names = [
+    'お客様A', 'お客様AA', 'お客様AAA',
+    '伊藤様', '長谷川様', '五十嵐様', '勅使河原様',
+    '長谷川小路右衛門様', '勅使河原三郎左衛門様'
+  ];
+  ['screen', 'print'].forEach(function (mode) {
+    var st = LABEL_STYLE[mode];
+    names.forEach(function (n) {
+      // 1名グループ（人数表記なし）
+      var a = labelFits(n, false, st);
+      ok(a.ok, mode + ' の「' + n + '」（人数表記なし）が収まらない: ' + a.why);
+      // 分割の断片など、人数表記が残るケース
+      var b = labelFits(n, true, st);
+      ok(b.ok, mode + ' の「' + n + '」（人数表記あり）が収まらない: ' + b.why);
+    });
+  });
+});
+
+test('1名のグループは、1席ブロックで人数表記を省く（1席＝1名で自明）', function () {
+  var labels = S.resolveLabels([
+    { id: 'g1', size: 1, surname: '勅使河原' },
+    { id: 'g2', size: 4, surname: '佐藤' }
+  ], { useRealName: true });
+  eq(labels[0].size, 1, '1名グループ');
+  eq(labels[0].label, '勅使河原様', 'ラベル');
+  eq(labels[1].size, 4, '4名グループ');
+  // 画面側は size===1 のときだけ人数表記を省く（app.js の hideCount 条件）
+  ok(labels[0].size === 1, '省略の判断に使う size が取れる');
+});
+
+console.log('\n--- 4の1の5. 印刷の線の使い分け ---');
+
+test('グループ枠は全色とも実線（線の種類は状態の区別だけに使う）', function () {
+  var css = fs.readFileSync(path.join(__dirname, '..', 'css', 'print.css'), 'utf8');
+  for (var i = 0; i < 10; i++) {
+    var re = new RegExp('\\.blk\\.c' + i + ' \\{([^}]*)\\}');
+    var m = css.match(re);
+    ok(m, '.blk.c' + i + ' の指定がない');
+    ok(!/dashed|dotted|double/.test(m[1]),
+      '.blk.c' + i + ' に線の種類が指定されている: ' + m[1].trim());
+  }
+  // 太さも色ごとに変えない
+  ok(!/\.blk\.c\d\.bt/.test(css), '色ごとの線の太さ指定が残っている');
+});
+
+test('意味のある線（分割・男女・自由席）は残っている', function () {
+  var css = fs.readFileSync(path.join(__dirname, '..', 'css', 'print.css'), 'utf8');
+  ok(/\.blk\.is-split \{[^}]*solid/.test(css), '分割の赤い実線がない');
+  ok(/\.seat\.is-mixed \{[^}]*dashed/.test(css), '男女のオレンジ破線がない');
+  ok(/\.blk-free \{[^}]*dashed/.test(css), '自由席の破線がない');
 });
 
 console.log('\n--- 5. 表示ラベル ---');

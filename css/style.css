@@ -117,6 +117,9 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 .btn-primary:hover { background: var(--accent-dark); }
 .btn-mini { padding: .25rem .6rem; font-size: .85rem; }
 .btn-row { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .9rem; }
+/* 削除は、押し間違えないよう控えめな見た目に（文字で「削除」と明示） */
+.btn-delete { color: var(--error); border-color: #e0bdb9; background: #fff; }
+.btn-delete:hover { background: var(--error-bg); }
 .inline-btn { display: inline-block; text-decoration: none; }
 
 .toggle-line {
@@ -305,14 +308,21 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 .block-name { display: inline; }
 .block-count { display: inline; margin-left: .15rem; font-size: .95rem; }
 
-/* 1席ぶんしか幅がないブロック（おひとり様など）は、小さめ・2行にして必ず読めるようにする */
+/* 1席ぶんしか幅がないブロック（おひとり様など）は、文字が欠けないように整える。
+   ① 縮小 → ② 1名なら人数表記を省く → ③ 折り返し → ④ それでも入らなければ末尾を省略 */
 .blk-label-wrap.is-narrow { padding-bottom: 1rem; }
 .block-label.is-narrow {
   font-size: .66rem; line-height: 1.12; padding: 0 .1rem;
   white-space: normal; word-break: break-all; max-width: 100%;
+  overflow: visible; text-overflow: clip;
 }
-.block-label.is-narrow .block-name { display: block; }
-.block-label.is-narrow .block-count { display: block; margin-left: 0; font-size: .74rem; }
+.block-label.is-narrow.is-long { font-size: .58rem; } /* 長い名字・フルネーム用 */
+.block-label.is-narrow .block-name {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  overflow: hidden; word-break: break-all;
+}
+.block-label.is-narrow.has-count .block-name { -webkit-line-clamp: 2; }
+.block-label.is-narrow .block-count { display: block; margin-left: 0; font-size: .68rem; }
 
 .blk-free {
   position: relative; pointer-events: none; z-index: 3;

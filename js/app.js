@@ -110,7 +110,9 @@
       head.appendChild(el('span', 'spacer'));
       head.appendChild(miniBtn('↑', function () { move(i, -1); }));
       head.appendChild(miniBtn('↓', function () { move(i, 1); }));
-      head.appendChild(miniBtn('×', function () { state.groups.splice(i, 1); changed(); }));
+      var del = miniBtn('削除', function () { state.groups.splice(i, 1); changed(); });
+      del.className += ' btn-delete';
+      head.appendChild(del);
       li.appendChild(head);
 
       var body = el('div', 'group-body');
@@ -461,16 +463,23 @@
         labelDone[b.groupId] = true;
         var l = labels[b.groupId];
         if (l) {
-          // 1席ぶんしか幅がないブロックは、文字を小さくして必ず読めるようにする
+          // 1席ぶんしか幅がないブロックは、文字が欠けないように整える
+          //   ① 文字を小さくする ② 1名のグループは人数表記を省く（1席＝1名で自明）
+          //   ③ 3行まで折り返す ④ それでも入らないときだけ末尾を省略
           var narrow = (b.label.trackEnd - b.label.trackStart) === 0;
+          var hideCount = narrow && l.size === 1 && !b.isSplit;
+          var longName = narrow && l.label.length > 12;
+
           var wrapL = el('div', 'blk-label-wrap' + (b.isSplit ? ' is-split' : '') +
             (narrow ? ' is-narrow' : ''));
           wrapL.style.gridRow = b.label.row0 + ' / ' + (b.label.row1 + 1);
           wrapL.style.gridColumn = b.label.trackStart + ' / ' + (b.label.trackEnd + 1);
+
           var tag = el('span', 'block-label' + (b.isSplit ? ' is-split' : '') +
-            (narrow ? ' is-narrow' : ''));
+            (narrow ? ' is-narrow' : '') + (longName ? ' is-long' : '') +
+            (hideCount ? '' : ' has-count'));
           tag.appendChild(el('span', 'block-name', l.label));
-          tag.appendChild(el('span', 'block-count', l.sizeMark + '名'));
+          if (!hideCount) tag.appendChild(el('span', 'block-count', l.sizeMark + '名'));
           if (b.isSplit) tag.appendChild(el('span', 'block-split-mark', '席が' + b.pieces + 'か所に分かれています'));
           wrapL.appendChild(tag);
           wrap.appendChild(wrapL);
