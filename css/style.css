@@ -192,7 +192,7 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 
 .seat {
   position: relative; border: 1px solid var(--line); border-radius: 5px;
-  background: #fff; min-height: 2.6rem; padding: .8rem .2rem .2rem;
+  background: #fff; min-height: 3.1rem; padding: .8rem .2rem .2rem;
   text-align: center; font-size: .78rem; line-height: 1.2;
   cursor: pointer; overflow: hidden;
 }
@@ -204,7 +204,15 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 .seat.is-empty { color: #aab4ba; }
 .seat.is-selected { outline: 3px solid var(--error); z-index: 4; }
 .seat .seat-label { font-weight: 700; display: block; }
-.seat .seat-mark { display: block; font-size: .82rem; font-weight: 700; }
+/* 男女の印は席の右下すみに固定。ブロックのラベル（中央）と重ならないようにする */
+.seat .seat-mark {
+  position: absolute; right: .18rem; bottom: .06rem;
+  font-size: .78rem; font-weight: 700; line-height: 1.1;
+  padding: 0 .16rem; border-radius: 3px;
+  background: rgba(255, 255, 255, .75);
+}
+.seat.is-empty .seat-mark { background: none; color: #aab4ba; font-weight: 400; }
+.seat.is-crew .seat-mark { display: none; }
 
 .seat.g0 { background: var(--c0-bg); border-color: var(--c0-line); }
 .seat.g1 { background: var(--c1-bg); border-color: var(--c1-line); }
@@ -231,18 +239,21 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 .blk.c5 { border-color: var(--c5-line); }
 .blk.is-picked { border-color: var(--error); z-index: 5; }
 
+/* ラベルは中央だが、席の右下すみ（男女の印）の帯を避けて少し上に寄せる */
 .blk-label-wrap {
   position: relative; pointer-events: none; z-index: 4;
   display: flex; align-items: center; justify-content: center;
+  padding-bottom: 1.15rem;
 }
 .block-label {
-  background: rgba(255, 255, 255, .88);
-  border-radius: 6px; padding: .05rem .45rem;
-  font-weight: 700; font-size: .9rem; line-height: 1.3;
+  background: rgba(255, 255, 255, .72);
+  border-radius: 6px; padding: 0 .3rem;
+  font-weight: 700; font-size: .86rem; line-height: 1.25;
   text-align: center; max-width: 98%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.block-name { display: block; }
-.block-count { display: block; font-size: .95rem; }
+.block-name { display: inline; }
+.block-count { display: inline; margin-left: .15rem; font-size: .95rem; }
 
 .blk-free {
   position: relative; pointer-events: none; z-index: 3;
@@ -254,6 +265,15 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 .seat.is-picked-seat { box-shadow: inset 0 0 0 2px var(--error); }
 
 .mode-row { margin: 0 0 .3rem; }
+
+/* 手で直したあとの見直し（印刷には出しません） */
+.manual-check {
+  margin-top: .7rem; padding: .7rem .9rem;
+  border: 1px solid #e5cf9a; border-left: 6px solid var(--warn);
+  border-radius: var(--radius); background: var(--warn-bg);
+}
+.manual-check-head { margin: 0; font-weight: 700; font-size: .95rem; }
+.manual-check .msg-list { margin-top: .45rem; }
 .flash {
   margin: .6rem 0 0; padding: .5rem .8rem; border-radius: 8px;
   background: #eef4f2; border: 1px solid var(--accent); font-size: .93rem;

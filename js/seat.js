@@ -98,9 +98,25 @@
     return '(' + n + ')';
   }
 
+  /**
+   * 申し込み順の記号（A・B・C…、26組を超えたら AA・AB…）。
+   * 人数の丸数字（②など）と見分けやすいよう、グループの呼び名は英字にしています。
+   */
+  function alpha(n) {
+    n = Number(n);
+    if (!isFinite(n) || n < 1) return String(n);
+    var out = '';
+    while (n > 0) {
+      var r = (n - 1) % 26;
+      out = String.fromCharCode(65 + r) + out;
+      n = Math.floor((n - 1) / 26);
+    }
+    return out;
+  }
+
   /* ---------------------------------------------------------
    * 表示ラベル
-   *  - 既定は「お客様①」（申し込み順の番号）。個人名は出さない。
+   *  - 既定は「お客様A」（申し込み順の記号）。個人名は出さない。
    *  - 実名表示をONにしたときだけ「名字＋様」。同姓が複数いればフルネームに切り替える。
    * ------------------------------------------------------- */
 
@@ -116,7 +132,7 @@
 
     return groups.map(function (g, i) {
       var no = i + 1;
-      var auto = 'お客様' + maru(no);
+      var auto = 'お客様' + alpha(no);
       var surname = (g.surname || '').trim();
       var full = (g.fullName || '').trim();
       var label = auto;
@@ -131,6 +147,7 @@
       return {
         groupId: g.id,
         no: no,
+        mark: alpha(no),
         label: label,
         autoLabel: auto,
         usedRealName: useRealName && !!surname,
@@ -546,7 +563,7 @@
               warnings.push({
                 type: 'front-overflow',
                 groupId: g.id,
-                message: '前席をご希望のグループが前から3列目までに収まりませんでした（グループ' + (g.order + 1) + '）。'
+                message: '前席をご希望のグループが前から3列目までに収まりませんでした（お客様' + alpha(g.order + 1) + '）。'
               });
             }
           }
@@ -563,7 +580,7 @@
             warnings.push({
               type: 'split',
               groupId: g.id,
-              message: 'グループ' + (g.order + 1) + 'は、席の空きぐあいの都合で2か所以上に分かれました。'
+              message: 'お客様' + alpha(g.order + 1) + 'は、席の空きぐあいの都合で2か所以上に分かれました。'
             });
           }
         }
@@ -572,7 +589,7 @@
           warnings.push({
             type: 'no-seat',
             groupId: g.id,
-            message: '座席が足りません。グループ' + (g.order + 1) + 'の' + left + '名分を配置できませんでした。'
+            message: '座席が足りません。お客様' + alpha(g.order + 1) + 'の' + left + '名分を配置できませんでした。'
           });
           break;
         }
@@ -695,13 +712,23 @@
   /**
    * グループを、指定した席を起点に動かす。
    * その席にぴったり置けないときは、その列から近いところに置き直します。
+   * @returns {object} { ok, reason, groupId, size, seatId, warnings }
+   *   reason は失敗の理由コード。日本語の文にするのは画面側（app.js）の仕事です。
    */
   function moveGroup(layout, groups, day, groupId, targetSeatId) {
     var g = groupById(groups, groupId);
-    var m = /^r(\d+)-(\d+)$/.exec(targetSeatId || '');
-    if (!g || !m) return { ok: false, message: '動かせませんでした。' };
+    if (!g) return { ok: false, reason: 'group-not-found' };
 
-    var origin = { row: Number(m[1]), col: Number(m[2]) };
+    var seat = seatById(layout, targetSeatId);
+    if (!seat) return { ok: false, reason: 'seat-not-found', seatId: targetSeatId };
+    if (seat.isCrew) return { ok: false, reason: 'crew-seat', seatId: targetSeatId };
+
+    var owner = ownerOfSeat(day, targetSeatId);
+    if (owner === groupId) {
+      return { ok: false, reason: 'same-group', groupId: groupId, seatId: targetSeatId };
+    }
+
+    var origin = { row: seat.row, col: seat.col };
     var snap = snapshot(day);
     var placer = createPlacer(layout, day);
     placer.removeGroup(groupId);
@@ -710,49 +737,151 @@
     if (warnings.some(function (w) { return w.type === 'no-seat'; })) {
       restore(day, snap);
       refreshDay(layout, day);
-      return { ok: false, message: 'そこには置けませんでした。ほかの場所を試してください。' };
+      return { ok: false, reason: 'no-room', groupId: groupId, size: g.size, seatId: targetSeatId };
     }
     refreshDay(layout, day);
-    return {
-      ok: true,
-      message: warnings.length ? warnings[0].message : '',
-      warnings: warnings
-    };
+    return { ok: true, reason: 'moved', groupId: groupId, seatId: targetSeatId, warnings: warnings };
   }
 
   /**
    * 2つのグループの場所を入れ替える。
    * 人数が違う場合は、相手のいた場所を起点に置き直します。
+   * @returns {object} { ok, reason, groupId, otherGroupId, size, warnings }
    */
   function swapGroups(layout, groups, day, groupIdA, groupIdB) {
     var ga = groupById(groups, groupIdA);
     var gb = groupById(groups, groupIdB);
-    if (!ga || !gb || groupIdA === groupIdB) return { ok: false, message: '入れ替えられませんでした。' };
+    if (!ga) return { ok: false, reason: 'group-not-found', groupId: groupIdA };
+    if (!gb) return { ok: false, reason: 'group-not-found', groupId: groupIdB };
+    if (groupIdA === groupIdB) {
+      return { ok: false, reason: 'same-group', groupId: groupIdA };
+    }
 
     var oa = originOfGroup(day, groupIdA);
     var ob = originOfGroup(day, groupIdB);
-    if (!oa || !ob) return { ok: false, message: '入れ替えられませんでした。' };
+    if (!oa) return { ok: false, reason: 'not-seated', groupId: groupIdA };
+    if (!ob) return { ok: false, reason: 'not-seated', groupId: groupIdB };
 
     var snap = snapshot(day);
     var placer = createPlacer(layout, day);
     placer.removeGroup(groupIdA);
     placer.removeGroup(groupIdB);
 
-    var warnings = []
-      .concat(placer.placeGroup(ga, { origin: ob, fromRow: ob.row, ignoreFront: true }))
-      .concat(placer.placeGroup(gb, { origin: oa, fromRow: oa.row, ignoreFront: true }));
+    var wa = placer.placeGroup(ga, { origin: ob, fromRow: ob.row, ignoreFront: true });
+    var wb = placer.placeGroup(gb, { origin: oa, fromRow: oa.row, ignoreFront: true });
+    var failed = null;
+    if (wa.some(function (w) { return w.type === 'no-seat'; })) failed = ga;
+    else if (wb.some(function (w) { return w.type === 'no-seat'; })) failed = gb;
 
-    if (warnings.some(function (w) { return w.type === 'no-seat'; })) {
+    if (failed) {
       restore(day, snap);
       refreshDay(layout, day);
-      return { ok: false, message: 'この2組は入れ替えられませんでした（席の形が合いません）。' };
+      return {
+        ok: false, reason: 'no-room-swap',
+        groupId: failed.id, size: failed.size,
+        otherGroupId: failed.id === groupIdA ? groupIdB : groupIdA
+      };
     }
     refreshDay(layout, day);
     return {
-      ok: true,
-      message: warnings.length ? warnings[0].message : '',
-      warnings: warnings
+      ok: true, reason: 'swapped',
+      groupId: groupIdA, otherGroupId: groupIdB,
+      warnings: wa.concat(wb)
     };
+  }
+
+  function seatById(layout, seatId) {
+    for (var i = 0; i < layout.seats.length; i++) {
+      if (layout.seats[i].id === seatId) return layout.seats[i];
+    }
+    return null;
+  }
+  function ownerOfSeat(day, seatId) {
+    var p = day.placements[seatId];
+    if (p) return p.groupId;
+    return (day.reserved || {})[seatId] || null;
+  }
+
+  /* ---------------------------------------------------------
+   * 手動で直したあとの見直し
+   * 自動割り当ては決まりを守るので、ふつうは何も出ません。
+   * 手で動かして決まりから外れたときだけ、注意として拾い上げます。
+   * ------------------------------------------------------- */
+
+  function inspectDay(layout, groups, day) {
+    var issues = [];
+    var byId = {};
+    groups.forEach(function (g) { byId[g.id] = g; });
+    function nameOf(g) { return 'お客様' + alpha(g.order + 1); }
+
+    // 1. 前席オプションのグループが前3列の外に出ていないか
+    groups.forEach(function (g) {
+      if (!g.frontOption) return;
+      var seats = (day.seatsOfGroup && day.seatsOfGroup[g.id]) || [];
+      var out = seats.filter(function (sid) {
+        var m = /^r(\d+)-/.exec(sid);
+        return m && Number(m[1]) > FRONT_ROWS;
+      });
+      if (out.length) {
+        issues.push({
+          type: 'front-out', groupId: g.id,
+          message: nameOf(g) + '（前席オプション）が' + (FRONT_ROWS + 1) + '列目以降にいます。'
+        });
+      }
+    });
+
+    // 2. 男女の相席が起きていないか
+    (day.shared || []).forEach(function (sh) {
+      if (!sh.mixedGender) return;
+      issues.push({
+        type: 'mixed-gender', row: sh.row,
+        message: sh.row + '列目で男女が相席になっています。'
+      });
+    });
+
+    // 3. グループが離れ離れになっていないか
+    var blockCount = {};
+    (day.blocks || []).forEach(function (b) {
+      blockCount[b.groupId] = (blockCount[b.groupId] || 0) + 1;
+    });
+    Object.keys(blockCount).forEach(function (gid) {
+      if (blockCount[gid] > 1 && byId[gid]) {
+        issues.push({
+          type: 'split', groupId: gid,
+          message: nameOf(byId[gid]) + 'の席が' + blockCount[gid] + 'か所に分かれています。'
+        });
+      }
+    });
+
+    // 4. 人数ぶんの席があるか
+    groups.forEach(function (g) {
+      var seats = (day.seatsOfGroup && day.seatsOfGroup[g.id]) || [];
+      if (seats.length !== g.size) {
+        issues.push({
+          type: 'seat-count', groupId: g.id,
+          message: nameOf(g) + '（' + g.size + '名）の席が' + seats.length + '席しかありません。'
+        });
+      }
+    });
+
+    // 5. 業務席にお客様が座っていないか
+    layout.seats.forEach(function (s) {
+      if (s.isCrew && day.placements[s.id]) {
+        issues.push({
+          type: 'crew-seat', seatId: s.id,
+          message: s.row + '列目の業務席にお客様が座っています。'
+        });
+      }
+    });
+
+    // 同じ内容の注意は1件にまとめる
+    var seen = {};
+    return issues.filter(function (i) {
+      var key = i.type + '|' + i.message;
+      if (seen[key]) return false;
+      seen[key] = true;
+      return true;
+    });
   }
 
   /* ---------------------------------------------------------
@@ -1076,6 +1205,14 @@
    * ------------------------------------------------------- */
 
   function swapSeats(layout, day, seatIdA, seatIdB) {
+    if (seatIdA === seatIdB) return { ok: false, reason: 'same-seat', seatId: seatIdA };
+    var sa = seatById(layout, seatIdA);
+    var sb = seatById(layout, seatIdB);
+    if (!sa) return { ok: false, reason: 'seat-not-found', seatId: seatIdA };
+    if (!sb) return { ok: false, reason: 'seat-not-found', seatId: seatIdB };
+    if (sa.isCrew) return { ok: false, reason: 'crew-seat', seatId: seatIdA };
+    if (sb.isCrew) return { ok: false, reason: 'crew-seat', seatId: seatIdB };
+
     var p = day.placements;
     var res = day.reserved || (day.reserved = {});
     var blk = day.blocked || (day.blocked = {});
@@ -1095,7 +1232,8 @@
       if (p[id]) { delete res[id]; delete blk[id]; }
     });
 
-    return refreshDay(layout, day);
+    refreshDay(layout, day);
+    return { ok: true, reason: 'swapped', seatIds: [seatIdA, seatIdB] };
   }
 
   return {
@@ -1110,11 +1248,13 @@
     assignDay: assignDay,
     assign: assign,
     resolveLabels: resolveLabels,
+    alpha: alpha,
     buildColors: buildColors,
     computeBlocks: computeBlocks,
     freeAreaBlock: freeAreaBlock,
     sharedPairs: sharedPairs,
     originOfGroup: originOfGroup,
+    inspectDay: inspectDay,
     swapSeats: swapSeats,
     moveGroup: moveGroup,
     swapGroups: swapGroups,

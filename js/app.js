@@ -23,6 +23,7 @@
   var result = null;       // BusSeat.assign() の結果
   var selectedSeat = null; // 入れ替え待ちの席（1席ずつモード）
   var selection = null;    // 動かす相手として選んだグループ（グループごとモード）
+  var manualEdited = {};   // 手で直した日（その日だけ見直しの注意を出す）
 
   /* ---------------- ちいさな道具 ---------------- */
 
@@ -106,7 +107,9 @@
       var li = el('li', 'group-item' + (colorIdx != null ? ' color-' + colorIdx : ''));
 
       var head = el('div', 'group-head');
-      head.appendChild(el('span', 'group-no', (i + 1) + '組目　' + labels[i].label + '　' + labels[i].sizeMark + '名'));
+      var l = labels[i];
+      var headName = l.label === l.autoLabel ? '' : '　' + l.label;
+      head.appendChild(el('span', 'group-no', l.mark + '組' + headName + '　' + l.sizeMark + '名'));
       head.appendChild(el('span', 'spacer'));
       head.appendChild(miniBtn('↑', function () { move(i, -1); }));
       head.appendChild(miniBtn('↓', function () { move(i, 1); }));
@@ -211,6 +214,7 @@
 
   function recompute() {
     selection = null;
+    manualEdited = {};
     result = S.assign({
       layoutType: state.layoutType,
       groups: state.groups,
@@ -225,6 +229,8 @@
     renderGroups();
     renderMessages();
     renderSheets();
+    renderManualWarnings();
+    flash('');
     save();
   }
 
@@ -453,9 +459,15 @@
       ? S.swapGroups(result.layout, result.groups, day, selection.groupId, owner)
       : S.moveGroup(result.layout, result.groups, day, selection.groupId, seatId);
 
-    flash(res.ok ? (res.message || '動かしました。') : res.message);
-    if (res.ok) selection = null;
+    if (res.ok) {
+      manualEdited[dayIndex] = true;
+      selection = null;
+      flash(成功の一言(res));
+    } else {
+      flash(失敗の理由(res));
+    }
     renderSheets();
+    renderManualWarnings();
   }
 
   // 1席ずつ入れ替えるモード
@@ -465,10 +477,84 @@
     } else if (selectedSeat.seatId === seatId) {
       selectedSeat = null;
     } else {
-      S.swapSeats(result.layout, result.days[dayIndex], selectedSeat.seatId, seatId);
-      selectedSeat = null;
+      var res = S.swapSeats(result.layout, result.days[dayIndex], selectedSeat.seatId, seatId);
+      if (res.ok) {
+        manualEdited[dayIndex] = true;
+        selectedSeat = null;
+        flash('2つの席を入れ替えました。');
+      } else {
+        flash(失敗の理由(res));
+      }
     }
     renderSheets();
+    renderManualWarnings();
+  }
+
+  /** グループの呼び名（人数つき） */
+  function 呼び名(groupId) {
+    var l = null;
+    (result.labels || []).forEach(function (x) { if (x.groupId === groupId) l = x; });
+    if (!l) return 'このグループ';
+    return l.label + '（' + l.size + '名）';
+  }
+
+  /** seat.js が返す失敗理由コードを、日本語の文にする */
+  function 失敗の理由(res) {
+    switch (res.reason) {
+      case 'crew-seat':
+        return '業務席にはお客様を配置できません。';
+      case 'same-seat':
+        return '同じ席が選ばれています。別の席を選んでください。';
+      case 'same-group':
+        return '移動先が同じグループの席です。別の場所を選んでください。';
+      case 'no-room':
+        return 呼び名(res.groupId) + 'が入るまとまった空きがありません。ほかの場所を試してください。';
+      case 'no-room-swap':
+        return 呼び名(res.groupId) + 'が入るまとまった空きがないため、入れ替えできませんでした。';
+      case 'not-seated':
+        return 'まだ座席が決まっていないグループです。先に「自動で席を決める」を押してください。';
+      case 'group-not-found':
+      case 'seat-not-found':
+        return '対象が見つかりませんでした。もう一度選び直してください。';
+      default:
+        return '動かせませんでした。';
+    }
+  }
+
+  /** うまくいったときの一言（注意があればそれも伝える） */
+  function 成功の一言(res) {
+    var ws = res.warnings || [];
+    if (ws.length) return ws[0].message;
+    return res.reason === 'swapped' ? '2組の場所を入れ替えました。' : '移動しました。';
+  }
+
+  /**
+   * 手で直したあとの見直し。
+   * 自動割り当ては決まりを守るので、手で直した日だけ点検して注意を出します。
+   * 印刷には含めません。
+   */
+  function renderManualWarnings() {
+    var box = $('manual-warnings');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!result) return;
+
+    var rows = [];
+    result.days.forEach(function (day, di) {
+      if (!manualEdited[di]) return;
+      S.inspectDay(result.layout, result.groups, day).forEach(function (issue) {
+        rows.push((state.days > 1 ? (di + 1) + '日目：' : '') + issue.message);
+      });
+    });
+    if (rows.length === 0) return;
+
+    var card = el('div', 'manual-check');
+    card.appendChild(el('p', 'manual-check-head',
+      '手で直したあとの確認（' + rows.length + '件）　※印刷には出ません'));
+    var ul = el('ul', 'msg-list');
+    rows.forEach(function (t) { ul.appendChild(el('li', '', t)); });
+    card.appendChild(ul);
+    box.appendChild(card);
   }
 
   function flash(text) {

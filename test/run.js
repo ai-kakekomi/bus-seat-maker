@@ -416,6 +416,173 @@ test('グループを動かしても、ほかのグループはそのまま', fu
   eq(day.seatsOfGroup['g2'].slice().sort().join(','), before2, 'g2が動いてしまった');
 });
 
+console.log('\n--- 3の4. 失敗したときの理由コード ---');
+
+test('業務席を指定したら crew-seat', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 2), group('g2', 2)], days: 1 });
+  var day = r.days[0];
+  var crew = r.layout.seats.filter(function (s) { return s.isCrew; })[0].id;
+  var before = JSON.stringify(day.placements);
+
+  var res = S.moveGroup(r.layout, r.groups, day, 'g1', crew);
+  eq(res.ok, false, '移動の成否');
+  eq(res.reason, 'crew-seat', '理由コード');
+  eq(JSON.stringify(day.placements), before, '座席が変わってしまった');
+
+  var res2 = S.swapSeats(r.layout, day, day.seatsOfGroup['g1'][0], crew);
+  eq(res2.ok, false, '席入れ替えの成否');
+  eq(res2.reason, 'crew-seat', '理由コード');
+});
+
+test('同じグループの席を指定したら same-group', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 4), group('g2', 2)], days: 1 });
+  var day = r.days[0];
+  var mine = day.seatsOfGroup['g1'][1];
+  var res = S.moveGroup(r.layout, r.groups, day, 'g1', mine);
+  eq(res.ok, false, '移動の成否');
+  eq(res.reason, 'same-group', '理由コード');
+
+  var res2 = S.swapGroups(r.layout, r.groups, day, 'g1', 'g1');
+  eq(res2.ok, false, '入れ替えの成否');
+  eq(res2.reason, 'same-group', '理由コード');
+});
+
+test('同じ席を2回指定したら same-seat', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 2)], days: 1 });
+  var day = r.days[0];
+  var sid = day.seatsOfGroup['g1'][0];
+  var res = S.swapSeats(r.layout, day, sid, sid);
+  eq(res.ok, false, '成否');
+  eq(res.reason, 'same-seat', '理由コード');
+});
+
+test('空きが足りないときは no-room（座席は元のまま）', function () {
+  var groups = [];
+  for (var i = 1; i <= 25; i++) groups.push(group('g' + i, 2)); // 50名／43席
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  var day = r.days[0];
+
+  // 席が用意できなかったグループを探す
+  var homeless = null;
+  r.groups.forEach(function (g) {
+    if (!homeless && (day.seatsOfGroup[g.id] || []).length === 0) homeless = g.id;
+  });
+  ok(homeless, '席なしのグループがない（テスト条件が不適切）');
+
+  var before = JSON.stringify(day.placements);
+  var res = S.moveGroup(r.layout, r.groups, day, homeless, 'r5-1');
+  eq(res.ok, false, '移動の成否');
+  eq(res.reason, 'no-room', '理由コード');
+  eq(res.size, 2, '人数（画面のメッセージに使う）');
+  eq(JSON.stringify(day.placements), before, '失敗したのに座席が変わった');
+});
+
+test('知らないグループ・席なら not-found 系', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 2)], days: 1 });
+  var day = r.days[0];
+  eq(S.moveGroup(r.layout, r.groups, day, 'なにこれ', 'r5-1').reason, 'group-not-found');
+  eq(S.moveGroup(r.layout, r.groups, day, 'g1', 'r99-9').reason, 'seat-not-found');
+  eq(S.swapSeats(r.layout, day, 'r99-9', 'r5-1').reason, 'seat-not-found');
+});
+
+test('うまくいったときは ok と理由コードが返る', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 2), group('g2', 2)], days: 1 });
+  var day = r.days[0];
+  eq(S.moveGroup(r.layout, r.groups, day, 'g1', 'r8-1').reason, 'moved');
+  eq(S.swapGroups(r.layout, r.groups, day, 'g1', 'g2').reason, 'swapped');
+  eq(S.swapSeats(r.layout, day, day.seatsOfGroup['g1'][0], 'r10-4').reason, 'swapped');
+});
+
+console.log('\n--- 3の5. 手で直したあとの見直し ---');
+
+test('自動で決めたあとは注意が出ない', function () {
+  var groups = [
+    group('f1', 2, { frontOption: true, genders: ['male', 'female'] }),
+    group('g1', 4), group('g2', 3), group('g3', 1), group('g4', 5)
+  ];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 2 });
+  r.days.forEach(function (day, di) {
+    var issues = S.inspectDay(r.layout, r.groups, day);
+    eq(issues.length, 0, (di + 1) + '日目の注意: ' + issues.map(function (i) { return i.message; }).join(' / '));
+  });
+});
+
+test('前席オプション組を後ろに動かすと注意が出る', function () {
+  var groups = [group('f1', 2, { frontOption: true }), group('g1', 4), group('g2', 4)];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  var day = r.days[0];
+  eq(S.inspectDay(r.layout, r.groups, day).length, 0, '動かす前');
+
+  var res = S.moveGroup(r.layout, r.groups, day, 'f1', 'r7-1');
+  eq(res.ok, true, '移動の成否');
+
+  var issues = S.inspectDay(r.layout, r.groups, day);
+  var front = issues.filter(function (i) { return i.type === 'front-out'; });
+  eq(front.length, 1, '前席オプションの注意');
+  eq(front[0].groupId, 'f1', '対象グループ');
+  ok(front[0].message.indexOf('お客様A') >= 0, 'グループの記号が入っていない: ' + front[0].message);
+  ok(front[0].message.indexOf('前席オプション') >= 0, '前席オプションと書かれていない');
+  ok(front[0].message.indexOf('4列目以降') >= 0, '列の説明が入っていない: ' + front[0].message);
+});
+
+test('手で入れ替えて男女が相席になると注意が出る', function () {
+  // 男性2名と女性2名を、通路をはさまない となりどうしにする
+  var groups = [
+    group('g1', 2, { genders: ['male', 'male'] }),
+    group('g2', 2, { genders: ['female', 'female'] }),
+    group('g3', 2, { genders: ['male', 'male'] })
+  ];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  var day = r.days[0];
+  eq(S.inspectDay(r.layout, r.groups, day).length, 0, '入れ替える前');
+
+  // g1 の1席と g2 の1席を入れ替えて、男女が並ぶ状態を作る
+  var a = day.seatsOfGroup['g1'][1];
+  var b = day.seatsOfGroup['g2'][0];
+  var res = S.swapSeats(r.layout, day, a, b);
+  eq(res.ok, true, '入れ替えの成否');
+
+  var issues = S.inspectDay(r.layout, r.groups, day);
+  var mixed = issues.filter(function (i) { return i.type === 'mixed-gender'; });
+  ok(mixed.length >= 1, '男女相席の注意が出ていない');
+  ok(/\d+列目で男女が相席になっています。/.test(mixed[0].message), 'メッセージの形: ' + mixed[0].message);
+
+  // 同じ内容の注意が重複して出ないこと
+  var texts = issues.map(function (i) { return i.type + '|' + i.message; });
+  eq(texts.length, texts.filter(function (t, i) { return texts.indexOf(t) === i; }).length, '重複した注意');
+});
+
+test('グループが離れ離れになると注意が出る', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 4), group('g2', 4)], days: 1 });
+  var day = r.days[0];
+  eq(S.inspectDay(r.layout, r.groups, day).length, 0, '動かす前');
+
+  var far = r.layout.seats.filter(function (s) {
+    return !s.isCrew && !day.placements[s.id] && !day.reserved[s.id] && !day.blocked[s.id];
+  }).pop().id;
+  S.swapSeats(r.layout, day, day.seatsOfGroup['g1'][0], far);
+
+  var issues = S.inspectDay(r.layout, r.groups, day);
+  var split = issues.filter(function (i) { return i.type === 'split'; });
+  eq(split.length, 1, '離れ離れの注意');
+  eq(split[0].groupId, 'g1', '対象グループ');
+});
+
+test('注意のメッセージには個人名を出さない（記号だけ）', function () {
+  var groups = [
+    group('f1', 2, { frontOption: true, surname: '山田' }),
+    group('g1', 4, { surname: '鈴木' }), group('g2', 4, { surname: '佐藤' })
+  ];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1, useRealName: true });
+  var day = r.days[0];
+  S.moveGroup(r.layout, r.groups, day, 'f1', 'r7-1');
+  S.inspectDay(r.layout, r.groups, day).forEach(function (i) {
+    ['山田', '鈴木', '佐藤'].forEach(function (n) {
+      ok(i.message.indexOf(n) < 0, '注意に名字が出ている: ' + i.message);
+    });
+  });
+});
+
 console.log('\n--- 4. 複数日と巡回シフト ---');
 
 function starts(groups, dayCount) {
@@ -592,13 +759,46 @@ test('最後部まで埋まっていれば自由席は出ない', function () {
 
 console.log('\n--- 5. 表示ラベル ---');
 
-test('既定は自動ラベル「お客様①」（個人名を出さない）', function () {
+test('既定は自動ラベル「お客様A」（個人名を出さない）', function () {
   var labels = S.resolveLabels([
     { id: 'g1', size: 2, surname: '山田' },
     { id: 'g2', size: 1, surname: '鈴木' }
   ], {});
-  eq(labels[0].label, 'お客様①');
-  eq(labels[1].label, 'お客様②');
+  eq(labels[0].label, 'お客様A');
+  eq(labels[1].label, 'お客様B');
+});
+
+test('申し込み順の記号は A・B・C…、26組を超えたら AA・AB…', function () {
+  eq(S.alpha(1), 'A');
+  eq(S.alpha(2), 'B');
+  eq(S.alpha(26), 'Z');
+  eq(S.alpha(27), 'AA');
+  eq(S.alpha(28), 'AB');
+  eq(S.alpha(52), 'AZ');
+  eq(S.alpha(53), 'BA');
+  eq(S.alpha(703), 'AAA');
+});
+
+test('30組でも自動ラベルが重複しない', function () {
+  var groups = [];
+  for (var i = 1; i <= 30; i++) groups.push({ id: 'g' + i, size: 1 });
+  var labels = S.resolveLabels(groups, {});
+  eq(labels[25].label, 'お客様Z', '26組目');
+  eq(labels[26].label, 'お客様AA', '27組目');
+  var seen = {};
+  labels.forEach(function (l) {
+    ok(!seen[l.label], '重複したラベル: ' + l.label);
+    seen[l.label] = true;
+  });
+});
+
+test('グループの記号と人数の丸数字は別の表記になる（見間違い防止）', function () {
+  var labels = S.resolveLabels([{ id: 'g1', size: 2 }, { id: 'g2', size: 3 }], {});
+  eq(labels[0].label, 'お客様A');
+  eq(labels[0].sizeMark, '②');
+  eq(labels[1].label, 'お客様B');
+  eq(labels[1].sizeMark, '③');
+  eq(labels[1].mark, 'B', 'グループの記号');
 });
 
 test('実名表示ONなら「名字＋様」', function () {
@@ -632,7 +832,7 @@ test('同姓なのにフルネーム未入力なら印が付く', function () {
 
 test('名字が未入力なら実名表示ONでも自動ラベルのまま', function () {
   var labels = S.resolveLabels([{ id: 'g1', size: 3 }], { useRealName: true });
-  eq(labels[0].label, 'お客様①');
+  eq(labels[0].label, 'お客様A');
 });
 
 test('人数の丸数字（①②…㊿）', function () {

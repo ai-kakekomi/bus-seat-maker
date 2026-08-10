@@ -22,6 +22,8 @@
   .btn-row,
   .swap-hint,
   .flash,
+  #manual-warnings,
+  .manual-check,
   #input-pane { display: none !important; }
 
   .wrap { max-width: none; padding: 0; margin: 0; }
@@ -44,12 +46,17 @@
   .bus { gap: 1.2mm; }
 
   .seat {
-    min-height: 11mm; padding: 3.2mm .5mm .5mm;
+    min-height: 12.5mm; padding: 3.2mm .5mm .5mm;
     font-size: 7.6pt; line-height: 1.15;
     border: .25mm solid #666;
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
-  .seat .seat-mark { font-size: 7.4pt; }
+  /* 男女の印は右下すみ。ラベルと重ならないので、どの席でも読めます */
+  .seat .seat-mark {
+    right: .6mm; bottom: .2mm; font-size: 7.6pt;
+    background: rgba(255, 255, 255, .8) !important; padding: 0 .3mm;
+  }
+  .seat.is-empty .seat-mark { background: none !important; }
   .row-no { font-size: 5.6pt; }
 
   .seat.g0 { background: #fff6cf !important; }
@@ -85,10 +92,12 @@
   .blk.c4.bt, .blk.c4.br, .blk.c4.bb, .blk.c4.bl { border-width: 1.2mm; }
   .blk.c5.bt, .blk.c5.br, .blk.c5.bb, .blk.c5.bl { border-width: 1mm; }
 
+  .blk-label-wrap { padding-bottom: 4.2mm; }
   .block-label {
-    background: #fff !important; font-size: 8.6pt; padding: .2mm 1mm;
+    background: rgba(255, 255, 255, .8) !important;
+    font-size: 8.4pt; padding: 0 .8mm;
   }
-  .block-count { font-size: 9.2pt; }
+  .block-count { font-size: 9pt; }
   .blk-free { border: .7mm dashed #555 !important; margin: -.7mm; }
   .blk-free .block-label { font-size: 10pt; }
   .seat.is-picked-seat { box-shadow: none !important; }
