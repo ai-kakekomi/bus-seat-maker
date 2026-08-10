@@ -59,12 +59,23 @@
   .seat.is-empty .seat-mark { background: none !important; }
   .row-no { font-size: 5.6pt; }
 
-  .seat.g0 { background: #fff6cf !important; }
-  .seat.g1 { background: #e2effc !important; }
-  .seat.g2 { background: #fde8ed !important; }
-  .seat.g3 { background: #e6f6e6 !important; }
-  .seat.g4 { background: #f0e8ff !important; }
-  .seat.g5 { background: #ffeedd !important; }
+  .seat.g0 { background-color: #fff6cf !important; --stripe: #ffdf6e; }
+  .seat.g1 { background-color: #e2effc !important; --stripe: #a9d2f7; }
+  .seat.g2 { background-color: #fde8ed !important; --stripe: #ffbccb; }
+  .seat.g3 { background-color: #e6f6e6 !important; --stripe: #b0e6b0; }
+  .seat.g4 { background-color: #f0e8ff !important; --stripe: #d2bcfa; }
+  .seat.g5 { background-color: #ffeedd !important; --stripe: #ffc994; }
+
+  /* 前席オプションの斜めストライプ。白黒印刷でも濃淡の縞で見分けられます */
+  .seat.is-front-opt,
+  .legend .is-front-opt {
+    background-image: repeating-linear-gradient(
+      45deg,
+      var(--stripe) 0, var(--stripe) .9mm,
+      rgba(255, 255, 255, 0) .9mm, rgba(255, 255, 255, 0) 2mm
+    ) !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
 
   .seat.is-crew {
     background: #d8d8d8 !important; border-style: dashed !important; color: #333;
@@ -103,6 +114,7 @@
   .seat.is-picked-seat { box-shadow: none !important; }
 
   .legend { font-size: 7.5pt; margin-top: 2mm; }
+  .legend .lg-plain { background-color: #fff !important; --stripe: #b9c2c8; }
   .legend span { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
   .print-note { display: block !important; font-size: 8pt; margin-top: 3mm; color: #333; }

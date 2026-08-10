@@ -299,10 +299,16 @@
       sheet.appendChild(el('p', 'rear-mark', '後ろ'));
 
       var legend = el('div', 'legend');
+      var hasFront = false;
       result.labels.forEach(function (l) {
         var c = result.colors[l.groupId];
-        legend.appendChild(el('span', 'lg' + c, l.label + ' ' + l.sizeMark + '名'));
+        if (l.frontOption) hasFront = true;
+        legend.appendChild(el('span', 'lg' + c + (l.frontOption ? ' is-front-opt' : ''),
+          l.label + ' ' + l.sizeMark + '名' + (l.frontOption ? '（前席）' : '')));
       });
+      if (hasFront) {
+        legend.appendChild(el('span', 'legend-note is-front-opt lg-plain', '斜めストライプ＝前席オプション'));
+      }
       sheet.appendChild(legend);
 
       var note = el('p', 'print-note');
@@ -384,6 +390,13 @@
     return wrap;
   }
 
+  /** 前席オプションのグループなら、席を斜めストライプにするための印 */
+  function frontClass(groupId) {
+    var g = null;
+    (result.groups || []).forEach(function (x) { if (x.id === groupId) g = x; });
+    return g && g.frontOption ? ' is-front-opt' : '';
+  }
+
   function seatCell(seat, day, dayIndex, selectedGroup) {
     var cell = el('div', 'seat');
     cell.appendChild(el('span', 'row-no', seat.row + '-' + seat.col));
@@ -398,13 +411,13 @@
     var reservedBy = (day.reserved || {})[seat.id];
 
     if (p) {
-      cell.className += ' g' + result.colors[p.groupId];
+      cell.className += ' g' + result.colors[p.groupId] + frontClass(p.groupId);
       var mark = p.gender === 'male' ? '男' : (p.gender === 'female' ? '女' : '');
       cell.appendChild(el('span', 'seat-mark', mark));
       if (selectedGroup && p.groupId === selectedGroup) cell.className += ' is-picked-seat';
     } else if (reservedBy) {
       // 枠の中の空席（そのグループのために取ってある席）
-      cell.className += ' g' + result.colors[reservedBy] + ' is-empty';
+      cell.className += ' g' + result.colors[reservedBy] + frontClass(reservedBy) + ' is-empty';
       cell.appendChild(el('span', 'seat-mark', '空'));
       if (selectedGroup && reservedBy === selectedGroup) cell.className += ' is-picked-seat';
     } else {

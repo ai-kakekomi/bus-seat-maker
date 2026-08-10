@@ -149,6 +149,7 @@
         no: no,
         mark: alpha(no),
         label: label,
+        frontOption: !!g.frontOption,
         autoLabel: auto,
         usedRealName: useRealName && !!surname,
         duplicatedSurname: duplicated,

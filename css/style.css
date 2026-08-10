@@ -18,12 +18,12 @@
   --radius: 10px;
 
   /* グループのマーカー色（手書きの蛍光ペン運用の再現。6色） */
-  --c0-bg: #fff2b8; --c0-line: #c79a00;
-  --c1-bg: #d9ecff; --c1-line: #2f6fb0;
-  --c2-bg: #ffe0e6; --c2-line: #c04a63;
-  --c3-bg: #ddf5dd; --c3-line: #3d8b3d;
-  --c4-bg: #ece0ff; --c4-line: #7a53b8;
-  --c5-bg: #ffe6cc; --c5-line: #c1701a;
+  --c0-bg: #fff2b8; --c0-line: #c79a00; --c0-stripe: #ffdf6e;
+  --c1-bg: #d9ecff; --c1-line: #2f6fb0; --c1-stripe: #a9d2f7;
+  --c2-bg: #ffe0e6; --c2-line: #c04a63; --c2-stripe: #ffbccb;
+  --c3-bg: #ddf5dd; --c3-line: #3d8b3d; --c3-stripe: #b0e6b0;
+  --c4-bg: #ece0ff; --c4-line: #7a53b8; --c4-stripe: #d2bcfa;
+  --c5-bg: #ffe6cc; --c5-line: #c1701a; --c5-stripe: #ffc994;
 }
 
 * { box-sizing: border-box; }
@@ -214,12 +214,22 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 .seat.is-empty .seat-mark { background: none; color: #aab4ba; font-weight: 400; }
 .seat.is-crew .seat-mark { display: none; }
 
-.seat.g0 { background: var(--c0-bg); border-color: var(--c0-line); }
-.seat.g1 { background: var(--c1-bg); border-color: var(--c1-line); }
-.seat.g2 { background: var(--c2-bg); border-color: var(--c2-line); }
-.seat.g3 { background: var(--c3-bg); border-color: var(--c3-line); }
-.seat.g4 { background: var(--c4-bg); border-color: var(--c4-line); }
-.seat.g5 { background: var(--c5-bg); border-color: var(--c5-line); }
+.seat.g0 { background-color: var(--c0-bg); border-color: var(--c0-line); --stripe: var(--c0-stripe); }
+.seat.g1 { background-color: var(--c1-bg); border-color: var(--c1-line); --stripe: var(--c1-stripe); }
+.seat.g2 { background-color: var(--c2-bg); border-color: var(--c2-line); --stripe: var(--c2-stripe); }
+.seat.g3 { background-color: var(--c3-bg); border-color: var(--c3-line); --stripe: var(--c3-stripe); }
+.seat.g4 { background-color: var(--c4-bg); border-color: var(--c4-line); --stripe: var(--c4-stripe); }
+.seat.g5 { background-color: var(--c5-bg); border-color: var(--c5-line); --stripe: var(--c5-stripe); }
+
+/* 前席オプション（有料）のグループは斜めストライプ。色はそのままなので組の見分けは変わりません */
+.seat.is-front-opt,
+.legend .is-front-opt {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--stripe) 0, var(--stripe) 4px,
+    rgba(255, 255, 255, 0) 4px, rgba(255, 255, 255, 0) 9px
+  );
+}
 
 /* グループを囲む枠。形の外周を「辺の線」でなぞるので、四角でもL字でも囲めます */
 .blk {
@@ -283,12 +293,13 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 .legend span {
   border: 1px solid var(--line); border-radius: 6px; padding: .1rem .5rem;
 }
-.legend .lg0 { background: var(--c0-bg); border-color: var(--c0-line); }
-.legend .lg1 { background: var(--c1-bg); border-color: var(--c1-line); }
-.legend .lg2 { background: var(--c2-bg); border-color: var(--c2-line); }
-.legend .lg3 { background: var(--c3-bg); border-color: var(--c3-line); }
-.legend .lg4 { background: var(--c4-bg); border-color: var(--c4-line); }
-.legend .lg5 { background: var(--c5-bg); border-color: var(--c5-line); }
+.legend .lg0 { background-color: var(--c0-bg); border-color: var(--c0-line); --stripe: var(--c0-stripe); }
+.legend .lg1 { background-color: var(--c1-bg); border-color: var(--c1-line); --stripe: var(--c1-stripe); }
+.legend .lg2 { background-color: var(--c2-bg); border-color: var(--c2-line); --stripe: var(--c2-stripe); }
+.legend .lg3 { background-color: var(--c3-bg); border-color: var(--c3-line); --stripe: var(--c3-stripe); }
+.legend .lg4 { background-color: var(--c4-bg); border-color: var(--c4-line); --stripe: var(--c4-stripe); }
+.legend .lg5 { background-color: var(--c5-bg); border-color: var(--c5-line); --stripe: var(--c5-stripe); }
+.legend .lg-plain { background-color: #fff; --stripe: #c9d2d8; font-weight: 700; }
 
 .swap-hint {
   font-size: .9rem; background: #eef4f2; border: 1px dashed var(--accent);

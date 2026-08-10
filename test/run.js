@@ -830,6 +830,27 @@ test('同姓なのにフルネーム未入力なら印が付く', function () {
   eq(labels[0].label, '佐藤様');
 });
 
+test('ラベルに前席オプションの印が付く（画面のストライプ表示に使う）', function () {
+  var labels = S.resolveLabels([
+    { id: 'g1', size: 2, frontOption: true },
+    { id: 'g2', size: 3 }
+  ], {});
+  eq(labels[0].frontOption, true, '前席オプション組');
+  eq(labels[1].frontOption, false, 'ふつうの組');
+});
+
+test('割り当て結果からも前席オプションかどうかが分かる', function () {
+  var groups = [group('f1', 2, { frontOption: true }), group('g1', 4)];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  var flags = {};
+  r.groups.forEach(function (g) { flags[g.id] = g.frontOption; });
+  eq(flags['f1'], true, 'f1');
+  eq(flags['g1'], false, 'g1');
+  var byLabel = {};
+  r.labels.forEach(function (l) { byLabel[l.groupId] = l.frontOption; });
+  eq(byLabel['f1'], true, 'ラベル側のf1');
+});
+
 test('名字が未入力なら実名表示ONでも自動ラベルのまま', function () {
   var labels = S.resolveLabels([{ id: 'g1', size: 3 }], { useRealName: true });
   eq(labels[0].label, 'お客様A');
