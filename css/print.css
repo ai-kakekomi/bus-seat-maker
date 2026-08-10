@@ -70,6 +70,10 @@
   .seat.g3 { background-color: #e6f6e6 !important; --stripe: #b0e6b0; }
   .seat.g4 { background-color: #f0e8ff !important; --stripe: #d2bcfa; }
   .seat.g5 { background-color: #ffeedd !important; --stripe: #ffc994; }
+  .seat.g6 { background-color: #ddf5f1 !important; --stripe: #a3e3d9; }
+  .seat.g7 { background-color: #f1e7dc !important; --stripe: #d8bfa5; }
+  .seat.g8 { background-color: #eef3d4 !important; --stripe: #d2e08c; }
+  .seat.g9 { background-color: #fbe6f6 !important; --stripe: #eebbe3; }
 
   /* 前席オプションの斜めストライプ。白黒印刷でも濃淡の縞で見分けられます */
   .seat.is-front-opt,
@@ -103,10 +107,18 @@
   .blk.c3 { border-color: #2c6b2c !important; border-style: dotted; }
   .blk.c4 { border-color: #5b3e93 !important; border-style: double; }
   .blk.c5 { border-color: #94540f !important; border-style: dashed; }
+  .blk.c6 { border-color: #12645a !important; border-style: solid; }
+  .blk.c7 { border-color: #6d452c !important; border-style: dotted; }
+  .blk.c8 { border-color: #566218 !important; border-style: dashed; }
+  .blk.c9 { border-color: #832e76 !important; border-style: double; }
   .blk.c2.bt, .blk.c2.br, .blk.c2.bb, .blk.c2.bl { border-width: 1mm; }
   .blk.c3.bt, .blk.c3.br, .blk.c3.bb, .blk.c3.bl { border-width: 1mm; }
   .blk.c4.bt, .blk.c4.br, .blk.c4.bb, .blk.c4.bl { border-width: 1.2mm; }
   .blk.c5.bt, .blk.c5.br, .blk.c5.bb, .blk.c5.bl { border-width: 1mm; }
+  .blk.c6.bt, .blk.c6.br, .blk.c6.bb, .blk.c6.bl { border-width: 1.2mm; }
+  .blk.c7.bt, .blk.c7.br, .blk.c7.bb, .blk.c7.bl { border-width: 1.2mm; }
+  .blk.c8.bt, .blk.c8.br, .blk.c8.bb, .blk.c8.bl { border-width: .5mm; }
+  .blk.c9.bt, .blk.c9.br, .blk.c9.bb, .blk.c9.bl { border-width: 1.4mm; }
 
   .blk-label-wrap { padding-bottom: 4.2mm; }
   .block-label {

@@ -661,6 +661,108 @@ test('手で縦長にしてしまったら、見直しで注意が出る', funct
   }
 });
 
+console.log('\n--- 3の3の3. 最後部列のつながり方 ---');
+
+test('最後部列と、その前の列は「縦すじ」で前後がつながる', function () {
+  var L = S.buildLayout('11x45');
+  function seat(r, c) { return L.seats.filter(function (s) { return s.row === r && s.col === c; })[0]; }
+  function ids(s) { return S.physicalNeighbors(L, s).map(function (n) { return n.id; }); }
+
+  // 最後部（11列）の5席は、真ん中を除いて10列目の席と前後で向かい合う
+  ok(ids(seat(11, 1)).indexOf('r10-1') >= 0, '11-1 の前が 10-1 でない');
+  ok(ids(seat(11, 2)).indexOf('r10-2') >= 0, '11-2 の前が 10-2 でない');
+  ok(ids(seat(11, 4)).indexOf('r10-3') >= 0, '11-4 の前が 10-3 でない');
+  ok(ids(seat(11, 5)).indexOf('r10-4') >= 0, '11-5 の前が 10-4 でない');
+  // 真ん中の席（通路の延長）だけは、前に席がない
+  eq(ids(seat(11, 3)).filter(function (id) { return id.indexOf('r10-') === 0; }).length, 0,
+    '11-3 の前に席があることになっている');
+  // 逆向きも同じ
+  ok(ids(seat(10, 3)).indexOf('r11-4') >= 0, '10-3 の後ろが 11-4 でない');
+  ok(ids(seat(10, 4)).indexOf('r11-5') >= 0, '10-4 の後ろが 11-5 でない');
+});
+
+test('最後部5席＋その前の1席は、ひとつづきのブロックになる', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 6), group('g2', 4)], days: 1 });
+  var day = r.days[0];
+
+  // g1 を「最後部の5席＋10列目の1席」へ手で移す
+  var target = ['r11-1', 'r11-2', 'r11-3', 'r11-4', 'r11-5', 'r10-4'];
+  var res = S.moveGroup(r.layout, r.groups, day, 'g1', 'r11-1');
+  if (!res.ok || day.seatsOfGroup['g1'].slice().sort().join(',') !== target.slice().sort().join(',')) {
+    // 自動で入らない場合は、席を1つずつ入れ替えて目的の形にする
+    target.forEach(function (want) {
+      if (day.placements[want] && day.placements[want].groupId === 'g1') return;
+      var from = day.seatsOfGroup['g1'].filter(function (id) { return target.indexOf(id) < 0; })[0];
+      if (from) S.swapSeats(r.layout, day, from, want);
+    });
+  }
+  eq(day.seatsOfGroup['g1'].slice().sort().join(','), target.slice().sort().join(','), '狙った席に移せていない');
+
+  eq(blocksOf(day, 'g1').length, 1, '最後部5席＋前の1席が2つに分かれて見えている');
+  eq(S.inspectDay(r.layout, r.groups, day).filter(function (i) { return i.type === 'split'; }).length,
+    0, '分かれているという注意が消えていない');
+});
+
+console.log('\n--- 3の3の4. 2段階（配置 → 男女の調整） ---');
+
+test('配置は男女に左右されない（同じ形なら性別が違っても同じ席取り）', function () {
+  function shape(genders) {
+    var groups = [
+      group('a', 4, { genders: genders.slice(0, 4) }),
+      group('b', 3, { genders: genders.slice(4, 7) }),
+      group('c', 5, { genders: genders.slice(7, 12) }),
+      group('d', 2, { genders: genders.slice(12, 14) })
+    ];
+    var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+    return ['a', 'b', 'c', 'd'].map(function (id) {
+      return id + ':' + r.days[0].seatsOfGroup[id].slice().sort().join('/');
+    }).join(' | ');
+  }
+  var allMale = [], mixed = [];
+  for (var i = 0; i < 14; i++) { allMale.push('male'); mixed.push(i % 2 ? 'male' : 'female'); }
+  eq(shape(mixed), shape(allMale), '男女の内訳で席取りが変わってしまっている');
+});
+
+test('男女の調整はグループの中だけで行う（席の割り当ては動かさない）', function () {
+  var groups = [
+    group('g1', 4, { genders: ['male', 'female', 'male', 'female'] }),
+    group('g2', 2, { genders: ['female', 'female'] }),
+    group('g3', 3, { genders: ['male', 'male', 'male'] })
+  ];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  var day = r.days[0];
+  var before = {};
+  ['g1', 'g2', 'g3'].forEach(function (id) { before[id] = day.seatsOfGroup[id].slice().sort().join(','); });
+
+  S.resolveGenders(r.layout, r.groups, day);
+
+  ['g1', 'g2', 'g3'].forEach(function (id) {
+    eq(day.seatsOfGroup[id].slice().sort().join(','), before[id], id + ' の席が動いてしまった');
+  });
+  // 人数の内訳は変わらない
+  groups.forEach(function (g) {
+    var counts = { male: 0, female: 0, unknown: 0 };
+    day.seatsOfGroup[g.id].forEach(function (sid) { counts[day.placements[sid].gender]++; });
+    var want = { male: 0, female: 0, unknown: 0 };
+    g.members.forEach(function (m) { want[m.gender]++; });
+    eq(JSON.stringify(counts), JSON.stringify(want), g.id + ' の男女の内訳が変わった');
+  });
+});
+
+test('男女の調整で、避けられる相席は避ける', function () {
+  // 男だけ／女だけの2名グループを交互に並べる
+  var groups = [];
+  for (var i = 1; i <= 20; i++) {
+    var g = i % 2 ? 'male' : 'female';
+    groups.push(group('g' + i, 2, { genders: [g, g] }));
+  }
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 2 });
+  r.days.forEach(function (day, di) {
+    eq(day.shared.filter(function (sh) { return sh.mixedGender; }).length, 0,
+      (di + 1) + '日目に男女が並んだ');
+  });
+});
+
 console.log('\n--- 3の4. 失敗したときの理由コード ---');
 
 test('業務席を指定したら crew-seat', function () {
@@ -1008,10 +1110,23 @@ test('前席オプションが定員を超えると、理由の分かる警告�
   ok(/お客様[A-Z]+（\d+名）/.test(w[0].message), '対象と人数が書かれていない: ' + w[0].message);
 });
 
-test('分かれてしまったときは、人数と理由が分かる警告が出る', function () {
+test('ほぼ満席の見本では、もう泣き別れが起きない', function () {
   var r = S.assign({ layoutType: '11x45', groups: fullHouseGroups(), days: 1 });
+  eq(r.warnings.filter(function (w) { return w.type === 'split'; }).length, 0,
+    '分割の警告: ' + r.warnings.filter(function (w) { return w.type === 'split'; })
+      .map(function (w) { return w.message; }).join(' / '));
+  r.groups.forEach(function (g) {
+    eq(blocksOf(r.days[0], g.id).length, 1, g.id + ' が分かれている');
+  });
+});
+
+test('分かれてしまったときは、人数と理由が分かる警告が出る', function () {
+  // 定員ぎりぎりまで大人数グループを詰めて、どうしても分かれる状況をつくる
+  var groups = [];
+  for (var i = 1; i <= 7; i++) groups.push(group('g' + i, 6)); // 42名／43席
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
   var w = r.warnings.filter(function (x) { return x.type === 'split'; });
-  ok(w.length >= 1, '分割の警告が出ていない');
+  ok(w.length >= 1, '分割の警告が出ていない（テスト条件が不適切）');
   ok(/【要確認】お客様[A-Z]+（\d+名）が離れた席に分かれてしまいました/.test(w[0].message),
     '理由が書かれていない: ' + w[0].message);
   ok(w[0].message.indexOf('ひとつづきに座れる場所がありません') >= 0, '原因が書かれていない');
@@ -1361,13 +1476,18 @@ test('隣り合うグループは違う色になる', function () {
   });
 });
 
-test('色は6色の範囲に収まる', function () {
+test('色は10色の範囲に収まり、混んできたら色数を広く使う', function () {
+  eq(S.COLOR_COUNT, 10, '色の数');
   var groups = [];
-  for (var i = 1; i <= 12; i++) groups.push(group('g' + i, 3));
-  var r = S.assign({ layoutType: '12x49', groups: groups, days: 1 });
+  for (var i = 1; i <= 14; i++) groups.push(group('g' + i, 3));
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 2 });
   Object.keys(r.colors).forEach(function (id) {
     ok(r.colors[id] >= 0 && r.colors[id] < S.COLOR_COUNT, id + ' の色 ' + r.colors[id]);
   });
+  // 14組もあれば、色は広く散らばってほしい
+  var used = {};
+  Object.keys(r.colors).forEach(function (id) { used[r.colors[id]] = true; });
+  ok(Object.keys(used).length >= 8, '使われた色が ' + Object.keys(used).length + '種しかない');
 });
 
 console.log('\n--- 7. 席数オーバーと手動入れ替え ---');

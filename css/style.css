@@ -30,6 +30,10 @@
   --c3-bg: #ddf5dd; --c3-line: #3d8b3d; --c3-stripe: #b0e6b0;
   --c4-bg: #ece0ff; --c4-line: #7a53b8; --c4-stripe: #d2bcfa;
   --c5-bg: #ffe6cc; --c5-line: #c1701a; --c5-stripe: #ffc994;
+  --c6-bg: #d5f2ee; --c6-line: #1a7f72; --c6-stripe: #a3e3d9;
+  --c7-bg: #ecdfd2; --c7-line: #8a5a3b; --c7-stripe: #d8bfa5;
+  --c8-bg: #e8efc4; --c8-line: #6b7a1f; --c8-stripe: #d2e08c;
+  --c9-bg: #f7dcf2; --c9-line: #a13a92; --c9-stripe: #eebbe3;
 }
 
 * { box-sizing: border-box; }
@@ -231,6 +235,10 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 .seat.g3 { background-color: var(--c3-bg); border-color: var(--c3-line); --stripe: var(--c3-stripe); }
 .seat.g4 { background-color: var(--c4-bg); border-color: var(--c4-line); --stripe: var(--c4-stripe); }
 .seat.g5 { background-color: var(--c5-bg); border-color: var(--c5-line); --stripe: var(--c5-stripe); }
+.seat.g6 { background-color: var(--c6-bg); border-color: var(--c6-line); --stripe: var(--c6-stripe); }
+.seat.g7 { background-color: var(--c7-bg); border-color: var(--c7-line); --stripe: var(--c7-stripe); }
+.seat.g8 { background-color: var(--c8-bg); border-color: var(--c8-line); --stripe: var(--c8-stripe); }
+.seat.g9 { background-color: var(--c9-bg); border-color: var(--c9-line); --stripe: var(--c9-stripe); }
 
 /* 前席オプション（有料）のグループは斜めストライプ。色はそのままなので組の見分けは変わりません */
 .seat.is-front-opt,
@@ -258,6 +266,10 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 .blk.c3 { border-color: var(--c3-line); }
 .blk.c4 { border-color: var(--c4-line); }
 .blk.c5 { border-color: var(--c5-line); }
+.blk.c6 { border-color: var(--c6-line); }
+.blk.c7 { border-color: var(--c7-line); }
+.blk.c8 { border-color: var(--c8-line); }
+.blk.c9 { border-color: var(--c9-line); }
 .blk.is-picked { border-color: var(--error); z-index: 5; }
 
 /* ラベルは中央だが、席の右下すみ（男女の印）の帯を避けて少し上に寄せる */
@@ -320,6 +332,10 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 .legend .lg3 { background-color: var(--c3-bg); border-color: var(--c3-line); --stripe: var(--c3-stripe); }
 .legend .lg4 { background-color: var(--c4-bg); border-color: var(--c4-line); --stripe: var(--c4-stripe); }
 .legend .lg5 { background-color: var(--c5-bg); border-color: var(--c5-line); --stripe: var(--c5-stripe); }
+.legend .lg6 { background-color: var(--c6-bg); border-color: var(--c6-line); --stripe: var(--c6-stripe); }
+.legend .lg7 { background-color: var(--c7-bg); border-color: var(--c7-line); --stripe: var(--c7-stripe); }
+.legend .lg8 { background-color: var(--c8-bg); border-color: var(--c8-line); --stripe: var(--c8-stripe); }
+.legend .lg9 { background-color: var(--c9-bg); border-color: var(--c9-line); --stripe: var(--c9-stripe); }
 .legend .lg-plain { background-color: #fff; --stripe: #c9d2d8; font-weight: 700; }
 
 .swap-hint {

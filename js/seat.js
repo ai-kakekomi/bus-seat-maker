@@ -85,6 +85,42 @@
     return col <= 2 ? col : col + 1;
   }
 
+  /**
+   * 席の物理的なとなり（前後左右）。
+   * 最後部列は5席で、その前の列（4席）とは席の数が違うので、
+   * 「画面の縦すじ（track）が同じもの」を前後のとなりとして扱います。
+   *   前の列 col1→track1 / col2→track2 / col3→track4 / col4→track5
+   *   最後部列 col1〜5 →track1〜5（真ん中のcol3＝track3は通路の延長なので、前に席がない）
+   */
+  function physicalNeighbors(layout, seat) {
+    var lastRow = layout.lastRow;
+    var byPos = layout._byPos;
+    if (!byPos) {
+      byPos = layout._byPos = {};
+      layout.seats.forEach(function (x) { byPos[x.row + ',' + x.col] = x; });
+    }
+    var byTrack = layout._byTrack;
+    if (!byTrack) {
+      byTrack = layout._byTrack = {};
+      layout.seats.forEach(function (x) { byTrack[x.row + '#' + trackOf(layout, x.row, x.col)] = x; });
+    }
+
+    var out = [];
+    // 左右（通路をはさむ左右も、となりとして数えます）
+    [seat.col - 1, seat.col + 1].forEach(function (c) {
+      var n = byPos[seat.row + ',' + c];
+      if (n) out.push(n);
+    });
+    // 前後は「縦すじが同じ席」
+    var t = trackOf(layout, seat.row, seat.col);
+    [seat.row - 1, seat.row + 1].forEach(function (r) {
+      if (r < 1 || r > lastRow) return;
+      var n = byTrack[r + '#' + t];
+      if (n) out.push(n);
+    });
+    return out;
+  }
+
   /* ---------------------------------------------------------
    * 丸数字（①②③…）
    * ------------------------------------------------------- */
@@ -216,6 +252,7 @@
   var MAX_WASTE = 2;      // 四角にするために空けてよい席数の上限
   var MAX_DEPTH = 2;      // かたまりの奥行き（前後に何列ぶんまで広げてよいか）
   var AISLE_BALANCE = 0.5; // 通路をまたいで人数が割れることへの好みの重み
+  var GENDER_HINT = 0.45;  // 男女が並びそうな場所を、軽く避けるための重み
 
   /**
    * 通路をまたぐときの分かれ方への点数。
@@ -360,12 +397,9 @@
       return shapeAllowed(ww, hh, deepOk);
     }
 
-    // computeBlocks と同じつながり方（通路をはさむ左右も、となりとして数える）
+    // computeBlocks と同じつながり方
     function neighborKeys(s5) {
-      var out = [s5.row + ',' + (s5.col - 1), s5.row + ',' + (s5.col + 1)];
-      if (s5.row !== lastRow) out.push((s5.row - 1) + ',' + s5.col);
-      if (s5.row + 1 !== lastRow) out.push((s5.row + 1) + ',' + s5.col);
-      return out;
+      return physicalNeighbors(layout, s5).map(function (n) { return n.row + ',' + n.col; });
     }
 
     function rectSeats(r0, c0, w, h) {
@@ -381,63 +415,59 @@
     }
 
     /**
-     * この四角に、この人たちを座らせられるか。
-     * 座らせられるなら「誰をどの席に」の計画を返す。無理なら null。
+     * この形に、この人たちを座らせられるか。
+     * ここでは男女のことは考えません（配置＝パズルに専念）。
+     * 男女の並びは、配置が決まったあとに resolveGenders() で整えます。
      */
-    function planMembers(seats, members, count, groupId, ignoreGender) {
-      var inRect = {};
-      seats.forEach(function (s) { inRect[s.id] = true; });
-
-      var constraints = [];
-      var hasForeign = false;
-      seats.forEach(function (s) {
-        var need = [];
-        neighborsOf(s).forEach(function (n) {
-          if (inRect[n.id]) return;
-          var o = ownerOf(n);
-          if (!o || o === groupId) return;
-          hasForeign = true;
-          var pp = day.placements[n.id];
-          if (pp) need.push(pp.gender);
+    function planMembers(seats, members, count, groupId) {
+      // 相席を作らない設定のときは、別グループと隣り合う形は選ばない
+      if (!sharing()) {
+        var inRect = {};
+        seats.forEach(function (s2) { inRect[s2.id] = true; });
+        var foreign = false;
+        seats.forEach(function (s2) {
+          neighborsOf(s2).forEach(function (n) {
+            if (inRect[n.id]) return;
+            var o = ownerOf(n);
+            if (o && o !== groupId) foreign = true;
+          });
         });
-        if (need.length) constraints.push({ seat: s, need: need });
-      });
-
-      // 相席を作らない設定のときは、別グループと隣り合う四角は選ばない
-      if (!sharing() && hasForeign) return null;
-
-      // どうしても席が足りないときは、男女の並びを我慢して席を用意する
-      // （お客様の席が無くなるより、隣り合わせを直していただくほうがまし）
-      if (ignoreGender) constraints = [];
-
-      var pool = members.slice(0, count).map(function (m) { return { gender: m.gender }; });
-      var plan = {};
-      var used = {};
-
-      // 制約のある席から先に、性別の合う人を決める
-      for (var i = 0; i < constraints.length; i++) {
-        var c = constraints[i];
-        var found = -1;
-        for (var j = 0; j < pool.length; j++) {
-          if (used[j]) continue;
-          var okAll = c.need.every(function (g) { return genderCompatible(g, pool[j].gender); });
-          if (okAll) { found = j; break; }
-        }
-        if (found < 0) return null; // 男女が並んでしまうので、この四角は使えない
-        used[found] = true;
-        plan[c.seat.id] = pool[found];
+        if (foreign) return null;
       }
 
-      var rest = [];
-      for (var k = 0; k < pool.length; k++) if (!used[k]) rest.push(pool[k]);
-      var ri = 0;
-      seats.forEach(function (s) {
-        if (plan[s.id]) return;
-        if (ri < rest.length) plan[s.id] = rest[ri++];
+      var plan = {};
+      var i = 0;
+      seats.forEach(function (s3) {
+        if (i < count) plan[s3.id] = { gender: members[i].gender };
+        i++;
       });
-      if (ri < rest.length) return null;
-
+      if (count > seats.length) return null;
       return { plan: plan };
+    }
+
+    /**
+     * その形に置くと、男女が並んでしまいそうかどうかの目安。
+     * 配置を止める決まりではなく、同じくらい良い形が複数あるときの「好み」として使います。
+     * （配置＝パズルを歪めないよう、あくまで軽い重みです）
+     */
+    function genderHint(cells, group) {
+      var have = { male: 0, female: 0, unknown: 0 };
+      group.members.forEach(function (m) { have[m.gender]++; });
+      var inRect = {};
+      cells.forEach(function (c) { inRect[c.id] = true; });
+
+      var risky = 0;
+      cells.forEach(function (c) {
+        neighborsOf(c).forEach(function (n) {
+          if (inRect[n.id]) return;
+          var p2 = day.placements[n.id];
+          if (!p2 || p2.groupId === group.id) return;
+          if (p2.gender === 'unknown') return;
+          // その性別に合わせられる人が自分のグループにいなければ、並んでしまう
+          if (have[p2.gender] === 0 && have.unknown === 0) risky++;
+        });
+      });
+      return risky * GENDER_HINT;
     }
 
     /**
@@ -487,11 +517,12 @@
               for (var si = 0; si < shapes.length; si++) {
                 var sh = shapes[si];
                 if (!opt.allowAnyShape && !mergedShapeOk(sh.seats, opt.groupId, opt.allowDeep)) continue;
-                var planned = planMembers(sh.seats, opt.members, count, opt.groupId, opt.ignoreGender);
+                var planned = planMembers(sh.seats, opt.members, count, opt.groupId);
                 if (!planned) continue;
 
                 var score = WIDTH_PENALTY[w] + h * 0.4 + sh.waste * 0.6 + sh.cut * 0.15 +
-                  aislePenalty(sh.seats, lastRow);
+                  aislePenalty(sh.seats, lastRow) +
+                  (opt.group ? genderHint(sh.seats, opt.group) : 0);
                 if (!best || score < best.score - 1e-9 ||
                     (Math.abs(score - best.score) < 1e-9 && c0 < best.c0)) {
                   best = {
@@ -649,7 +680,7 @@
       while (placedCount < g.size && guard++ < 60) {
         var left = g.size - placedCount;
         var rest = g.members.slice(placedCount);
-        var base = { groupId: g.id, members: rest, fromRow: opt.fromRow };
+        var base = { groupId: g.id, group: g, members: rest, fromRow: opt.fromRow };
         var pick = null;
 
         if (opt.origin && placedCount === 0) {
@@ -748,11 +779,9 @@
           }
         }
 
-        // ⑤ それでも置けないのは、男女の並びの決まりが理由。
-        // お客様を置き去りにしないため、その決まりだけ外して置きます。
-        // （分割を試したあとに行います。先に外すと、分割は減らないのに男女の並びだけ増えるため）
+        // ⑤ 相席を避けるために空けてあった席も使って、分けてでも席を用意する
         if (!pick) {
-          var loose = merge(base, { allowAnyShape: true, ignoreBlocked: true, ignoreGender: true });
+          var loose = merge(base, { allowAnyShape: true, ignoreBlocked: true });
           pick = findRect(left, false, loose);
           if (!pick) {
             for (var gsize = left - 1; gsize >= 1 && !pick; gsize--) {
@@ -849,6 +878,12 @@
         day = retry;
       }
     }
+
+    // 配置が決まったので、グループの中で誰がどの席かを決めて男女の並びを整える。
+    // それでも残る男女の並びは、同じ形どうしのグループ入れ替えで減らす。
+    resolveGenders(layout, groups, day);
+    relaxGenderConflicts(layout, groups, day);
+    day.shared = sharedPairs(layout, day);
 
     day.shared.forEach(function (sh) {
       if (sh.mixedGender) {
@@ -985,6 +1020,7 @@
     placer.removeGroup(groupId);
 
     var warnings = placer.placeGroup(g, { origin: origin, fromRow: origin.row, ignoreFront: true });
+    if (!warnings.some(function (w) { return w.type === 'no-seat'; })) resolveGenders(layout, groups, day);
     if (warnings.some(function (w) { return w.type === 'no-seat'; })) {
       restore(day, snap);
       refreshDay(layout, day);
@@ -1021,6 +1057,7 @@
     var wa = placer.placeGroup(ga, { origin: ob, fromRow: ob.row, ignoreFront: true });
     var wb = placer.placeGroup(gb, { origin: oa, fromRow: oa.row, ignoreFront: true });
     var failed = null;
+    if (!wa.concat(wb).some(function (w) { return w.type === 'no-seat'; })) resolveGenders(layout, groups, day);
     if (wa.some(function (w) { return w.type === 'no-seat'; })) failed = ga;
     else if (wb.some(function (w) { return w.type === 'no-seat'; })) failed = gb;
 
@@ -1171,6 +1208,254 @@
   }
 
   /* ---------------------------------------------------------
+   * 男女の並びを整える（配置が決まったあとの仕上げ）
+   *
+   * 席の割り当て（どのグループがどこに座るか）は変えません。
+   * 変えるのは「グループの中で、誰がどの席に座るか」だけです。
+   * 座席表には名前を出さないので、グループ内の並べ替えは自由に効かせられます。
+   * ------------------------------------------------------- */
+
+  function resolveGenders(layout, groups, day) {
+    var lastRow = layout.lastRow;
+    var byPos = {};
+    layout.seats.forEach(function (x) { byPos[x.row + ',' + x.col] = x; });
+    var byId = {};
+    groups.forEach(function (g) { byId[g.id] = g; });
+
+    // グループごとの席と、手持ちの男女の内訳
+    var cellsOf = {};
+    Object.keys(day.placements).forEach(function (sid) {
+      var gid = day.placements[sid].groupId;
+      (cellsOf[gid] = cellsOf[gid] || []).push(sid);
+    });
+    var pool = {};
+    Object.keys(cellsOf).forEach(function (gid) {
+      cellsOf[gid].sort();
+      pool[gid] = { male: 0, female: 0, unknown: 0 };
+      var g = byId[gid];
+      var n = cellsOf[gid].length;
+      var mem = (g ? g.members : []).slice(0, n);
+      mem.forEach(function (m) { pool[gid][m.gender]++; });
+      // 席の数と人数が合わないとき（分割等）は、足りないぶんを未入力として扱う
+      for (var k = mem.length; k < n; k++) pool[gid].unknown++;
+    });
+
+    // 通路をはさまずに隣り合う席（＝男女を合わせたい組み合わせ）
+    function partnersOf(seat) {
+      if (seat.row === lastRow) {
+        return [byPos[seat.row + ',' + (seat.col - 1)], byPos[seat.row + ',' + (seat.col + 1)]];
+      }
+      return [byPos[seat.row + ',' + (seat.col % 2 === 1 ? seat.col + 1 : seat.col - 1)]];
+    }
+
+    var pairs = [];
+    var seenPair = {};
+    layout.seats.forEach(function (seat) {
+      var a = day.placements[seat.id];
+      if (!a) return;
+      partnersOf(seat).forEach(function (n) {
+        if (!n) return;
+        var b = day.placements[n.id];
+        if (!b || b.groupId === a.groupId) return;
+        var key = [seat.id, n.id].sort().join('|');
+        if (seenPair[key]) return;
+        seenPair[key] = true;
+        pairs.push({ a: seat.id, ag: a.groupId, b: n.id, bg: b.groupId });
+      });
+    });
+
+    var assign = {};   // seatId -> gender
+    var left = {};     // グループごとの残り
+    Object.keys(pool).forEach(function (gid) {
+      left[gid] = { male: pool[gid].male, female: pool[gid].female, unknown: pool[gid].unknown };
+    });
+
+    function options(gid) {
+      var l = left[gid];
+      var out = [];
+      ['unknown', 'male', 'female'].forEach(function (k) { if (l[k] > 0) out.push(k); });
+      // 残りが多い方を先に試す（あとの自由度を残すため）
+      out.sort(function (x, y) { return l[y] - l[x]; });
+      return out;
+    }
+    function fits(x, y) { return x === 'unknown' || y === 'unknown' || x === y; }
+
+    var nodes = 0;
+    function solve(i) {
+      if (nodes++ > 20000) return false; // 念のための打ち切り
+      if (i >= pairs.length) return true;
+      var p = pairs[i];
+      var ga = assign[p.a], gb = assign[p.b];
+
+      if (ga && gb) return fits(ga, gb) ? solve(i + 1) : false;
+
+      var optsA = ga ? [ga] : options(p.ag);
+      for (var x = 0; x < optsA.length; x++) {
+        var oa = optsA[x];
+        if (!ga) { left[p.ag][oa]--; assign[p.a] = oa; }
+        var optsB = gb ? [gb] : options(p.bg);
+        for (var y = 0; y < optsB.length; y++) {
+          var ob = optsB[y];
+          if (!fits(oa, ob)) continue;
+          if (!gb) { left[p.bg][ob]--; assign[p.b] = ob; }
+          if (solve(i + 1)) return true;
+          if (!gb) { left[p.bg][ob]++; delete assign[p.b]; }
+        }
+        if (!ga) { left[p.ag][oa]++; delete assign[p.a]; }
+      }
+      return false;
+    }
+
+    var solved = solve(0);
+
+    // 解けなかった場合は、合わせられるところだけ合わせる（貪欲）
+    if (!solved) {
+      assign = {};
+      Object.keys(pool).forEach(function (gid) {
+        left[gid] = { male: pool[gid].male, female: pool[gid].female, unknown: pool[gid].unknown };
+      });
+      pairs.forEach(function (p) {
+        var ga = assign[p.a], gb = assign[p.b];
+        if (ga && gb) return;
+        var optsA = ga ? [ga] : options(p.ag);
+        for (var x = 0; x < optsA.length; x++) {
+          var oa = optsA[x];
+          var optsB = gb ? [gb] : options(p.bg);
+          var ob = null;
+          for (var y = 0; y < optsB.length; y++) {
+            if (fits(oa, optsB[y])) { ob = optsB[y]; break; }
+          }
+          if (ob === null) continue;
+          if (!ga) { left[p.ag][oa]--; assign[p.a] = oa; }
+          if (!gb) { left[p.bg][ob]--; assign[p.b] = ob; }
+          return;
+        }
+        // どうしても合わないので、そのまま置く
+        if (!ga) { var fa = options(p.ag)[0]; if (fa) { left[p.ag][fa]--; assign[p.a] = fa; } }
+        if (!gb) { var fb = options(p.bg)[0]; if (fb) { left[p.bg][fb]--; assign[p.b] = fb; } }
+      });
+    }
+
+    // 残りの席に、残りの人を前から順に入れる
+    Object.keys(cellsOf).forEach(function (gid) {
+      var rest = [];
+      ['male', 'female', 'unknown'].forEach(function (k) {
+        for (var i = 0; i < left[gid][k]; i++) rest.push(k);
+      });
+      var ri = 0;
+      cellsOf[gid].forEach(function (sid) {
+        if (assign[sid]) return;
+        assign[sid] = ri < rest.length ? rest[ri++] : 'unknown';
+      });
+    });
+
+    // 決めた並びを座席に反映する
+    Object.keys(assign).forEach(function (sid) {
+      if (day.placements[sid]) day.placements[sid].gender = assign[sid];
+    });
+
+    return { solved: solved, pairs: pairs.length };
+  }
+
+  /**
+   * 男女の並びが残ってしまったときの手直し。
+   * 「同じ形・同じ人数のかたまり」どうしで、グループの入れ替えを試します。
+   * 形も席の場所も変わらないので、座席表の見た目は崩れません。
+   */
+  function relaxGenderConflicts(layout, groups, day) {
+    function conflicts() {
+      resolveGenders(layout, groups, day);
+      return sharedPairs(layout, day).filter(function (sh) { return sh.mixedGender; }).length;
+    }
+    var best = conflicts();
+    if (best === 0) return 0;
+
+    var byId = {};
+    groups.forEach(function (g) { byId[g.id] = g; });
+
+    // 1グループ＝1かたまりのものだけを、入れ替えの対象にする
+    function slots() {
+      var count = {};
+      day.blocks.forEach(function (b) { count[b.groupId] = (count[b.groupId] || 0) + 1; });
+      return day.blocks.filter(function (b) { return count[b.groupId] === 1; }).map(function (b) {
+        // 席はそのまま、座る人だけを入れ替えるので、
+        // 「人数」と「席の数」が同じかたまりどうしなら形は崩れません（形が違っていても大丈夫）
+        var people = b.seatIds.filter(function (id) { return !!day.placements[id]; }).length;
+        return {
+          groupId: b.groupId,
+          sig: people + '#' + b.seatIds.length,
+          seatIds: b.seatIds.slice(),
+          people: people
+        };
+      });
+    }
+
+    // 2つのかたまりの中身（どのグループが座るか）を入れ替える
+    function swapSlots(s1, s2) {
+      var take = function (sl) {
+        return sl.seatIds.filter(function (id) { return day.placements[id]; })
+          .map(function (id) { return day.placements[id]; });
+      };
+      var p1 = take(s1), p2 = take(s2);
+      if (p1.length !== p2.length) return false;
+
+      var seats1 = s1.seatIds.filter(function (id) { return day.placements[id]; });
+      var seats2 = s2.seatIds.filter(function (id) { return day.placements[id]; });
+      seats1.forEach(function (id, i) { day.placements[id] = { groupId: p2[i].groupId, gender: p2[i].gender }; });
+      seats2.forEach(function (id, i) { day.placements[id] = { groupId: p1[i].groupId, gender: p1[i].gender }; });
+
+      // 取り置きの空席も一緒に付け替える
+      var g1 = s1.groupId, g2 = s2.groupId;
+      Object.keys(day.reserved).forEach(function (id) {
+        if (day.reserved[id] === g1) day.reserved[id] = '__tmp__';
+      });
+      Object.keys(day.reserved).forEach(function (id) {
+        if (day.reserved[id] === g2) day.reserved[id] = g1;
+      });
+      Object.keys(day.reserved).forEach(function (id) {
+        if (day.reserved[id] === '__tmp__') day.reserved[id] = g2;
+      });
+      refreshDay(layout, day);
+      return true;
+    }
+
+    var tries = 0;
+    for (var round = 0; round < 30 && best > 0; round++) {
+      var list = slots();
+      var bySig = {};
+      list.forEach(function (sl) { (bySig[sl.sig] = bySig[sl.sig] || []).push(sl); });
+
+      var improved = false;
+      var keys = Object.keys(bySig);
+      for (var k = 0; k < keys.length && !improved; k++) {
+        var arr = bySig[keys[k]];
+        for (var i = 0; i < arr.length && !improved; i++) {
+          for (var j = i + 1; j < arr.length && !improved; j++) {
+            if (tries++ > 3000) return best; // 念のための打ち切り
+            var g1 = byId[arr[i].groupId], g2 = byId[arr[j].groupId];
+            if (!g1 || !g2) continue;
+            // 男女の内訳が同じなら入れ替えても意味がない
+            if (genderKey(g1) === genderKey(g2)) continue;
+
+            if (!swapSlots(arr[i], arr[j])) continue;
+            var now = conflicts();
+            if (now < best) { best = now; improved = true; }
+            else { swapSlots(arr[j], arr[i]); conflicts(); } // 元に戻す
+          }
+        }
+      }
+      if (!improved) break;
+    }
+    return best;
+
+    function genderKey(g) {
+      var c = { male: 0, female: 0, unknown: 0 };
+      g.members.forEach(function (m) { c[m.gender]++; });
+      return c.male + '/' + c.female + '/' + c.unknown;
+    }
+  }
+
+  /* ---------------------------------------------------------
    * 相席（通路をはさまずに別グループと隣り合っている席）の一覧
    * ------------------------------------------------------- */
 
@@ -1274,14 +1559,9 @@
       return byPos[Number(m[1]) + ',' + Number(m[2])];
     }
 
-    // 前後左右のとなり。通路をはさむ左右（2席目と3席目）もとなりとして扱います。
+    // 前後左右のとなり（最後部列と、その前の列の対応も正しく見ます）
     function neighbors(seat) {
-      return [
-        byPos[seat.row + ',' + (seat.col - 1)],
-        byPos[seat.row + ',' + (seat.col + 1)],
-        seat.row === lastRow ? null : byPos[(seat.row - 1) + ',' + seat.col],
-        seat.row + 1 === lastRow ? null : byPos[(seat.row + 1) + ',' + seat.col]
-      ];
+      return physicalNeighbors(layout, seat);
     }
 
     // かたまりの外周をなぞるための情報を作る
@@ -1290,16 +1570,27 @@
       comp.forEach(function (s) { inBlock[s.row + ',' + s.col] = true; });
       function has(r, c) { return !!inBlock[r + ',' + c]; }
 
+      // その方向のとなりが同じかたまりに入っているか
+      function joined(seat, dir) {
+        var n = physicalNeighbors(layout, seat).filter(function (x) {
+          if (dir === 'top') return x.row === seat.row - 1;
+          if (dir === 'bottom') return x.row === seat.row + 1;
+          if (dir === 'left') return x.row === seat.row && x.col === seat.col - 1;
+          return x.row === seat.row && x.col === seat.col + 1;
+        })[0];
+        return !!(n && inBlock[n.row + ',' + n.col]);
+      }
+
       var cells = comp.map(function (s) {
         return {
           seatId: s.id,
           row: s.row,
           col: s.col,
           track: trackOf(layout, s.row, s.col),
-          top: !has(s.row - 1, s.col) || s.row === lastRow,
-          bottom: !has(s.row + 1, s.col) || s.row + 1 === lastRow,
-          left: !has(s.row, s.col - 1),
-          right: !has(s.row, s.col + 1)
+          top: !joined(s, 'top'),
+          bottom: !joined(s, 'bottom'),
+          left: !joined(s, 'left'),
+          right: !joined(s, 'right')
         };
       });
 
@@ -1388,7 +1679,7 @@
    * グループの色分け（隣り合うグループが同色にならないように）
    * ------------------------------------------------------- */
 
-  var COLOR_COUNT = 6;
+  var COLOR_COUNT = 10;
 
   function buildColors(layout, days, groups) {
     var seatById = {};
@@ -1422,15 +1713,25 @@
       });
     });
 
+    // 隣り合うグループと同じ色を避けつつ、色数をできるだけ散らす
+    // （同じ色ばかり続くと、満席のときに見分けづらくなるため）
     var colors = {};
+    var usedCount = [];
+    for (var ci = 0; ci < COLOR_COUNT; ci++) usedCount.push(0);
+
     groups.forEach(function (g) {
-      var used = {};
+      var banned = {};
       Object.keys(adj[g.id]).forEach(function (other) {
-        if (colors[other] != null) used[colors[other]] = true;
+        if (colors[other] != null) banned[colors[other]] = true;
       });
-      var c = 0;
-      while (used[c] && c < COLOR_COUNT - 1) c++;
-      colors[g.id] = c;
+      var best = -1;
+      for (var c = 0; c < COLOR_COUNT; c++) {
+        if (banned[c]) continue;
+        if (best < 0 || usedCount[c] < usedCount[best]) best = c;
+      }
+      if (best < 0) best = 0; // 色が足りないときは仕方なく重ねる
+      colors[g.id] = best;
+      usedCount[best]++;
     });
     return colors;
   }
@@ -1531,6 +1832,7 @@
     MAX_DEPTH: MAX_DEPTH,
     buildLayout: buildLayout,
     trackOf: trackOf,
+    physicalNeighbors: physicalNeighbors,
     normalizeGroups: normalizeGroups,
     shouldAvoidSharing: shouldAvoidSharing,
     startIndexForDay: startIndexForDay,
@@ -1542,6 +1844,8 @@
     computeBlocks: computeBlocks,
     freeAreaBlock: freeAreaBlock,
     sharedPairs: sharedPairs,
+    resolveGenders: resolveGenders,
+    relaxGenderConflicts: relaxGenderConflicts,
     originOfGroup: originOfGroup,
     inspectDay: inspectDay,
     issueKey: issueKey,
