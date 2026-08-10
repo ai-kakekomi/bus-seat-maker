@@ -238,47 +238,45 @@
     save();
   }
 
+  /**
+   * 座席表の上に出す説明。
+   * ここに出すのは「バス全体の話」だけ。
+   * 日ごとの注意（前席の溢れ・分かれてしまった等）は、その日の座席表の直下に出します。
+   */
   function renderMessages() {
     var box = $('messages');
     box.innerHTML = '';
     if (!result) return;
-
-    var seen = {};
-    var msgs = result.warnings.filter(function (w) {
-      var k = w.type + '|' + w.message;
-      if (seen[k]) return false;
-      seen[k] = true;
-      return true;
-    });
-
-    var labels = S.resolveLabels(state.groups, { useRealName: state.useRealName });
-    var needFull = labels.some(function (l) { return l.needsFullName; });
-    if (state.useRealName && needFull) {
-      msgs.push({ type: 'name', message: '同じ名字のお客様がいます。フルネームを入れると座席表で区別できます。' });
-    }
 
     if (state.groups.length === 0) {
       box.appendChild(el('p', 'callout', 'グループを入力すると、ここに座席表が出ます。'));
       return;
     }
 
-    // 混み具合の説明は、注意が出ているときも必ず添える（なぜそうなったかが分かるように）
+    // 混み具合の説明（どの日にも共通する話）
     var seats = result.layout.usableSeatCount;
     var 混み = 'お客様' + result.totalPeople + '名／お客様が座れる席' + seats + '席' +
       (result.spareSeats >= 0 ? '（空席' + result.spareSeats + '席）。' : '（' + (-result.spareSeats) + '席不足）。') +
       (result.sharing
         ? '席に余裕がないため、別のグループどうしが並ぶ席（相席）が出ます。相席になるときは男女が並ばないようにしています。'
         : '席に余裕があるので、別のグループと並ぶ席（相席）はありません。');
-    box.appendChild(el('p', 'callout', (msgs.length === 0 ? 'とくに問題は見つかりませんでした。' : '') + 混み));
+    box.appendChild(el('p', 'callout', 混み));
 
-    if (msgs.length === 0) return;
+    // 日ごとの注意が何件あるかだけ、ここでも知らせる（詳しくは各座席表の下）
+    var total = 0;
+    result.days.forEach(function (day, di) { total += dayNotes(day, di).items.length; });
+    if (total > 0) {
+      box.appendChild(el('p', 'help',
+        '気をつけたい点が' + total + '件あります。くわしくは、それぞれの座席表のすぐ下をご覧ください。'));
+    }
 
-    var ul = el('ul', 'msg-list');
-    msgs.forEach(function (w) {
-      var li = el('li', w.type === 'no-seat' ? 'is-error' : '', w.message);
-      ul.appendChild(li);
-    });
-    box.appendChild(ul);
+    // 同姓のお知らせ（全体の話）
+    var labels = S.resolveLabels(state.groups, { useRealName: state.useRealName });
+    if (state.useRealName && labels.some(function (l) { return l.needsFullName; })) {
+      var ul = el('ul', 'msg-list');
+      ul.appendChild(el('li', '', '同じ名字のお客様がいます。フルネームを入れると座席表で区別できます。'));
+      box.appendChild(ul);
+    }
   }
 
   function renderSheets() {
@@ -328,30 +326,61 @@
       box.appendChild(sheet);
 
       // 手で直した日だけ、その座席表のすぐ下に見直しの注意を出す（印刷には出ません）
-      var check = manualCheckBox(day, di);
+      var check = dayNotesBox(day, di);
       if (check) box.appendChild(check);
     });
   }
 
   /**
-   * 手で直したあとの見直し。
-   * 自動割り当ては決まりを守るので、手で直した日だけ点検します。
-   * どの日の話か分かるよう、その日の座席表の真下に置きます。
-   * 問題がないときも「問題は見つかりませんでした」と緑の枠で出します。
+   * その日の座席表につく注意を組み立てる。
+   *  ・手で直していない日 … 自動で割り当てたときに出た注意（理由つきの文言）
+   *  ・手で直した日 … いまの座席を 点検し直した結果（古い注意が残らないように）
+   * @returns {object} { items: [{text, level}], edited: boolean }
    */
-  function manualCheckBox(day, dayIndex) {
-    if (!manualEdited[dayIndex]) return null;
+  function dayNotes(day, dayIndex) {
+    var items = [];
+    var edited = !!manualEdited[dayIndex];
 
-    var issues = S.inspectDay(result.layout, result.groups, day);
-    // 「もともと出ていた注意」と「手で直したことで増えた注意」を分ける
-    var fresh = issues.filter(function (i) { return !i.preexisting; });
-    var old = issues.filter(function (i) { return i.preexisting; });
+    if (!edited) {
+      var seen = {};
+      (day.warnings || []).forEach(function (w) {
+        var key = w.type + '|' + w.message;
+        if (seen[key]) return;
+        seen[key] = true;
+        items.push({ text: w.message, level: w.level === 'error' ? 'error' : 'warn' });
+      });
+      // 重いもの（泣き別れ・席不足）を先に見せる
+      items.sort(function (a, b) {
+        return (a.level === 'error' ? 0 : 1) - (b.level === 'error' ? 0 : 1);
+      });
+    } else {
+      var issues = S.inspectDay(result.layout, result.groups, day);
+      issues.filter(function (i) { return !i.preexisting; }).forEach(function (i) {
+        items.push({ text: i.message, level: i.level === 'error' ? 'error' : 'warn' });
+      });
+      issues.filter(function (i) { return i.preexisting; }).forEach(function (i) {
+        items.push({ text: '（はじめの割り当てのときから）' + i.message, level: 'old' });
+      });
+    }
+    return { items: items, edited: edited };
+  }
+
+  /**
+   * その日の座席表のすぐ下に置く、注意の枠。
+   * どの日の話かが位置で分かるので、日番号は付けません。印刷には出しません。
+   */
+  function dayNotesBox(day, dayIndex) {
+    var notes = dayNotes(day, dayIndex);
+    var fresh = notes.items.filter(function (i) { return i.level !== 'old'; });
+    if (notes.items.length === 0 && !notes.edited) return null;
+
     var ok = fresh.length === 0;
-
     var card = el('div', 'manual-check no-print' + (ok ? ' is-ok' : ''));
 
     var head;
-    if (ok && old.length === 0) {
+    if (!notes.edited) {
+      head = 'この座席表について気をつけたい点（' + fresh.length + '件）';
+    } else if (ok && notes.items.length === 0) {
       head = 'この座席表を確認しました：問題は見つかりませんでした。';
     } else if (ok) {
       head = 'この座席表を確認しました：手で直したことで増えた問題はありません。';
@@ -360,11 +389,10 @@
     }
     card.appendChild(el('p', 'manual-check-head', head + '　※印刷には出ません'));
 
-    if (issues.length) {
+    if (notes.items.length) {
       var ul = el('ul', 'msg-list');
-      fresh.forEach(function (i) { ul.appendChild(el('li', '', i.message)); });
-      old.forEach(function (i) {
-        ul.appendChild(el('li', 'is-preexisting', '（はじめの割り当てのときから）' + i.message));
+      notes.items.forEach(function (i) {
+        ul.appendChild(el('li', i.level === 'error' ? 'is-error' : (i.level === 'old' ? 'is-preexisting' : ''), i.text));
       });
       card.appendChild(ul);
     }

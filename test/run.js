@@ -189,8 +189,8 @@ test('空席に余裕があるときは相席が発生しない', function () {
   eq(r.days[0].shared.length, 0, '相席の数');
 });
 
-test('満席に近いときは相席が起きるが、男女は同席にならない', function () {
-  // 43席に対して 奇数グループを多く詰める
+test('満席に近いときは相席が起きる。男女の並びは避けるが、席が足りないときだけ例外', function () {
+  // 43席に対して42名。男だけ／女だけの3名グループを詰められるだけ詰める
   var groups = [];
   for (var i = 1; i <= 14; i++) {
     groups.push(group('g' + i, 3, { genders: i % 2 ? ['male', 'male', 'male'] : ['female', 'female', 'female'] }));
@@ -198,10 +198,55 @@ test('満席に近いときは相席が起きるが、男女は同席になら�
   var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
   eq(r.sharing, true, '相席モード');
   ok(r.days[0].shared.length > 0, '相席が1件も起きていない（テスト条件が不適切）');
-  r.days[0].shared.forEach(function (sh) {
-    ok(!sh.mixedGender, sh.seatIds.join('/') + ' で男女が並んでいる');
+
+  // いちばん大事なのは、全員に席があること
+  eq(Object.keys(r.days[0].placements).length, 42, '席にあぶれた人がいる');
+  eq(r.warnings.filter(function (w) { return w.type === 'no-seat'; }).length, 0, '席不足の警告');
+
+  // 男女が並ぶのは最後の手段。起きた場合は必ず知らせる
+  var mixed = r.days[0].shared.filter(function (sh) { return sh.mixedGender; });
+  var warned = r.warnings.filter(function (w) { return w.type === 'mixed-gender'; });
+  if (mixed.length > 0) {
+    ok(warned.length > 0, '男女が並んでいるのに警告が出ていない');
+    ok(mixed.length <= 2, '男女の並びが多すぎる（' + mixed.length + '組）');
+  } else {
+    eq(warned.length, 0, '男女は並んでいないのに警告が出ている');
+  }
+});
+
+test('席にゆとりがあるときは、男女の並びはまったく起きない', function () {
+  var groups = [];
+  for (var i = 1; i <= 10; i++) {
+    groups.push(group('g' + i, 3, { genders: i % 2 ? ['male', 'male', 'male'] : ['female', 'female', 'female'] }));
+  }
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 2 }); // 30名／43席
+  r.days.forEach(function (day, di) {
+    eq(day.shared.filter(function (sh) { return sh.mixedGender; }).length, 0,
+      (di + 1) + '日目に男女が並んだ');
   });
-  eq(r.warnings.filter(function (w) { return w.type === 'mixed-gender'; }).length, 0, '男女同席の警告');
+  eq(r.warnings.filter(function (w) { return w.type === 'mixed-gender'; }).length, 0, '男女相席の警告');
+});
+
+test('席の数に収まる人数なら、誰も席にあぶれない', function () {
+  var patterns = [
+    [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3],          // 42名
+    [5, 5, 5, 5, 5, 5, 5, 5],                              // 40名
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 3, 4, 5, 6, 5, 4],  // 43名
+    [6, 6, 6, 6, 6, 6, 1],                                 // 37名
+    [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3] // 43名
+  ];
+  patterns.forEach(function (sizes, pi) {
+    var total = sizes.reduce(function (a, b) { return a + b; }, 0);
+    var groups = sizes.map(function (n, i) { return group('g' + i, n); });
+    var r = S.assign({ layoutType: '11x45', groups: groups, days: 3 });
+    ok(total <= r.layout.usableSeatCount, 'パターン' + pi + ' が定員超過（テスト条件が不適切）');
+    r.days.forEach(function (day, di) {
+      eq(Object.keys(day.placements).length, total,
+        'パターン' + pi + ' の' + (di + 1) + '日目で席にあぶれた人がいる');
+    });
+    eq(r.warnings.filter(function (w) { return w.type === 'no-seat'; }).length, 0,
+      'パターン' + pi + ' で席不足の警告');
+  });
 });
 
 test('性別が未入力の人は誰とでも相席できる（判定は入力頼み）', function () {
@@ -492,10 +537,12 @@ test('いろいろな込み具合でも、形の決まりを破らない', funct
       var r = S.assign({ layoutType: type, groups: groups, days: 2 });
       r.days.forEach(function (day, di) {
         var bad = badBlocks(day);
-        // 奥行き3列以上になるのは、警告が出ているときだけ
+        // 形の決まりを外すのは、必ず何かの注意とセットであること
+        // （前後に長い／形が整わない／泣き別れ のいずれか）
         bad.forEach(function (b) {
           var warned = r.warnings.some(function (w) {
-            return w.type === 'deep-block' && w.groupId === b.groupId;
+            return (w.type === 'deep-block' || w.type === 'odd-shape' || w.type === 'split') &&
+              w.groupId === b.groupId;
           });
           ok(warned, 'パターン' + pi + '(' + type + ') ' + (di + 1) + '日目：' +
             b.groupId + ' が ' + blockSize(b).w + '席幅×' + blockSize(b).h + '列なのに警告なし');
@@ -503,6 +550,39 @@ test('いろいろな込み具合でも、形の決まりを破らない', funct
       });
     });
   });
+});
+
+test('5名は「片側だけ」か「4＋1」になる（2＋3に割らない）', function () {
+  // 前に置くグループを変えて、5名グループの入り方をいろいろ試す
+  [[], [2], [4], [2, 2], [2, 4], [4, 4], [1, 2]].forEach(function (before) {
+    var groups = before.map(function (n, i) { return group('b' + i, n); });
+    groups.push(group('five', 5));
+    var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+    var bs = blocksOf(r.days[0], 'five');
+    eq(bs.length, 1, '前提' + before.join('+') + ' でブロックが分かれた');
+
+    var left = 0, right = 0;
+    bs[0].seatIds.forEach(function (id) {
+      if (seatRow(id) === r.layout.lastRow) return; // 最後部列は通路なし
+      if (seatCol(id) <= 2) left++; else right++;
+    });
+    if (left > 0 && right > 0) {
+      eq(Math.min(left, right), 1,
+        '前提' + before.join('+') + ' で通路の両側が ' + left + '＋' + right + ' に割れた（4＋1にしたい）');
+    }
+  });
+});
+
+test('7名も、通路の両側が半端に割れないようにする', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('先', 2), group('seven', 7)], days: 1 });
+  var bs = blocksOf(r.days[0], 'seven');
+  eq(bs.length, 1, 'ブロック数');
+  var left = 0, right = 0;
+  bs[0].seatIds.forEach(function (id) {
+    if (seatCol(id) <= 2) left++; else right++;
+  });
+  // 片側は最大4席なので 4＋3 が最も偏った形
+  ok(Math.max(left, right) >= 4, '片側に寄せられていない（' + left + '＋' + right + '）');
 });
 
 test('ほぼ満席でも、形の決まりを破らずに全員が座れる', function () {
@@ -514,16 +594,50 @@ test('ほぼ満席でも、形の決まりを破らずに全員が座れる', fu
   eq(r.warnings.filter(function (w) { return w.type === 'deep-block'; }).length, 0, '前後に長い形の警告');
 });
 
-test('満席近くでは、前後に長い形にせず分割を選ぶ', function () {
-  var groups = [];
-  for (var i = 1; i <= 13; i++) groups.push(group('g' + i, 3)); // 39名／43席
-  groups.push(group('big', 4));
+test('満席近くでは、泣き別れより「1かたまりのまま縦長」を選ぶ', function () {
+  // 41名／43席。最後の2名が入る場所が縦にしか残らない構成
+  var sizes = [1, 3, 1, 5, 2, 2, 2, 2, 3, 3, 5, 3, 3, 2, 2, 2];
+  var groups = sizes.map(function (n, i) { return group('g' + i, n); });
   var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
-  eq(badBlocks(r.days[0]).length, 0, '前後に長いブロックができた');
-  // 分割してでも2列以内を守る
-  r.days[0].blocks.forEach(function (b) {
-    ok(blockSize(b).h <= 2, b.groupId + ' の奥行き');
+  var day = r.days[0];
+
+  eq(Object.keys(day.placements).length, 41, '全員が座れていない');
+  eq(r.warnings.filter(function (w) { return w.type === 'split'; }).length, 0,
+    '泣き別れが起きた（縦長で1かたまりにできるはず）');
+
+  var odd = r.warnings.filter(function (w) {
+    return w.type === 'odd-shape' || w.type === 'deep-block';
   });
+  ok(odd.length >= 1, '形をゆるめた警告が出ていない');
+
+  // 警告の出たグループは、離れずに1かたまりのままであること
+  odd.forEach(function (w) {
+    eq(blocksOf(day, w.groupId).length, 1, w.groupId + ' が分かれてしまった');
+  });
+  // どのグループも1かたまり
+  groups.forEach(function (g) {
+    eq(blocksOf(day, g.id).length, 1, g.id + ' のかたまりの数');
+  });
+});
+
+test('泣き別れの警告はいちばん重い扱い（先頭・error）', function () {
+  var groups = fullHouseGroups();
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  r.warnings.forEach(function (w) {
+    if (w.type === 'split' || w.type === 'no-seat') eq(w.level, 'error', w.type + ' の重み');
+    else eq(w.level, 'warn', w.type + ' の重み');
+  });
+
+  // 見直しの一覧でも、重いものが先に並ぶ
+  var day = r.days[0];
+  S.moveGroup(r.layout, r.groups, day, 'g1', 'r9-1');
+  var issues = S.inspectDay(r.layout, r.groups, day);
+  var firstWarn = -1, lastError = -1;
+  issues.forEach(function (i, idx) {
+    if (i.level === 'error') lastError = idx;
+    else if (firstWarn < 0) firstWarn = idx;
+  });
+  if (lastError >= 0 && firstWarn >= 0) ok(lastError < firstWarn, '重いものが後ろに回っている');
 });
 
 test('手で縦長にしてしまったら、見直しで注意が出る', function () {
@@ -898,8 +1012,10 @@ test('分かれてしまったときは、人数と理由が分かる警告が�
   var r = S.assign({ layoutType: '11x45', groups: fullHouseGroups(), days: 1 });
   var w = r.warnings.filter(function (x) { return x.type === 'split'; });
   ok(w.length >= 1, '分割の警告が出ていない');
-  ok(/お客様[A-Z]+（\d+名）は、\d+名がまとまって座れる空きがなかったため/.test(w[0].message),
+  ok(/【要確認】お客様[A-Z]+（\d+名）が離れた席に分かれてしまいました/.test(w[0].message),
     '理由が書かれていない: ' + w[0].message);
+  ok(w[0].message.indexOf('ひとつづきに座れる場所がありません') >= 0, '原因が書かれていない');
+  eq(w[0].level, 'error', '重み');
 });
 
 test('「分かれました」の警告は、結果としてつながっていた場合には出さない', function () {

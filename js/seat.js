@@ -215,6 +215,21 @@
   var WIDTH_PENALTY = { 1: 4, 2: 0, 3: 1.2, 4: 0.5, 5: 0 };
   var MAX_WASTE = 2;      // 四角にするために空けてよい席数の上限
   var MAX_DEPTH = 2;      // かたまりの奥行き（前後に何列ぶんまで広げてよいか）
+  var AISLE_BALANCE = 0.5; // 通路をまたいで人数が割れることへの好みの重み
+
+  /**
+   * 通路をまたぐときの分かれ方への点数。
+   * またがないのがいちばん良く、またぐなら「大きいかたまり＋ひとり」が自然
+   * （5名なら 4＋1。2＋3 のように半端に割れる形は避けます）。
+   */
+  function aislePenalty(cells, lastRow) {
+    if (cells.length === 0) return 0;
+    if (cells[0].row === lastRow) return 0; // 最後部列は通路がない
+    var left = 0, right = 0;
+    cells.forEach(function (c) { if (c.col <= 2) left++; else right++; });
+    if (left === 0 || right === 0) return 0;
+    return (Math.min(left, right) - 1) * AISLE_BALANCE;
+  }
 
   /**
    * 使ってよい形か。
@@ -280,9 +295,11 @@
     function at(r, c) { return byPos[r + ',' + c] || null; }
     function sharing() { return day.sharing !== false; }
 
-    function taken(seat) {
-      return !seat || seat.isCrew ||
-        !!day.placements[seat.id] || !!day.reserved[seat.id] || !!day.blocked[seat.id];
+    function taken(seat, ignoreBlocked) {
+      if (!seat || seat.isCrew) return true;
+      if (day.placements[seat.id] || day.reserved[seat.id]) return true;
+      // blocked ＝ 相席を避けるために空けてある席。どうしても足りないときは使います
+      return !ignoreBlocked && !!day.blocked[seat.id];
     }
     function ownerOf(seat) {
       var p = day.placements[seat.id];
@@ -367,7 +384,7 @@
      * この四角に、この人たちを座らせられるか。
      * 座らせられるなら「誰をどの席に」の計画を返す。無理なら null。
      */
-    function planMembers(seats, members, count, groupId) {
+    function planMembers(seats, members, count, groupId, ignoreGender) {
       var inRect = {};
       seats.forEach(function (s) { inRect[s.id] = true; });
 
@@ -388,6 +405,10 @@
 
       // 相席を作らない設定のときは、別グループと隣り合う四角は選ばない
       if (!sharing() && hasForeign) return null;
+
+      // どうしても席が足りないときは、男女の並びを我慢して席を用意する
+      // （お客様の席が無くなるより、隣り合わせを直していただくほうがまし）
+      if (ignoreGender) constraints = [];
 
       var pool = members.slice(0, count).map(function (m) { return { gender: m.gender }; });
       var plan = {};
@@ -439,14 +460,14 @@
         if (opt.origin && r0 !== opt.origin.row) continue;
 
         var maxH = r0 === lastRow ? 1 : lastRow - r0; // 最後部列と通常列はまたがない
-        if (!opt.allowDeep) maxH = Math.min(maxH, MAX_DEPTH);
+        if (!opt.allowDeep && !opt.allowAnyShape) maxH = Math.min(maxH, MAX_DEPTH);
         var maxW = r0 === lastRow ? 5 : 4;
         var best = null;
 
         for (var h = 1; h <= maxH; h++) {
           if (opt.frontOnly && r0 + h - 1 > FRONT_ROWS) break;
           for (var w = 1; w <= maxW; w++) {
-            if (!shapeAllowed(w, h, opt.allowDeep)) continue;
+            if (!opt.allowAnyShape && !shapeAllowed(w, h, opt.allowDeep)) continue;
             var area = w * h;
             if (area < count) continue;
             if (area - count > MAX_WASTE) continue;
@@ -457,19 +478,20 @@
               if (!full) continue;
               var busy = false;
               for (var i = 0; i < full.length; i++) {
-                if (taken(full[i])) { busy = true; break; }
+                if (taken(full[i], opt.ignoreBlocked)) { busy = true; break; }
               }
               if (busy) continue;
 
               // 候補の形（そのままの四角／角を欠けさせたL字）
-              var shapes = shapeCandidates(full, w, h, count, allowPad, opt.allowDeep);
+              var shapes = shapeCandidates(full, w, h, count, allowPad, opt.allowDeep || opt.allowAnyShape);
               for (var si = 0; si < shapes.length; si++) {
                 var sh = shapes[si];
-                if (!mergedShapeOk(sh.seats, opt.groupId, opt.allowDeep)) continue;
-                var planned = planMembers(sh.seats, opt.members, count, opt.groupId);
+                if (!opt.allowAnyShape && !mergedShapeOk(sh.seats, opt.groupId, opt.allowDeep)) continue;
+                var planned = planMembers(sh.seats, opt.members, count, opt.groupId, opt.ignoreGender);
                 if (!planned) continue;
 
-                var score = WIDTH_PENALTY[w] + h * 0.4 + sh.waste * 0.6 + sh.cut * 0.15;
+                var score = WIDTH_PENALTY[w] + h * 0.4 + sh.waste * 0.6 + sh.cut * 0.15 +
+                  aislePenalty(sh.seats, lastRow);
                 if (!best || score < best.score - 1e-9 ||
                     (Math.abs(score - best.score) < 1e-9 && c0 < best.c0)) {
                   best = {
@@ -529,7 +551,7 @@
           }
           if (kept.length !== count) return;
           if (!isConnectedCells(kept)) return;
-          if (!cellsAllowed(kept, deepOk)) return; // 欠けさせた結果が縦長になっていないか
+          if (!deepOk && !cellsAllowed(kept, false)) return; // 欠けさせた結果が縦長になっていないか
 
           var key = kept.map(function (k) { return k.seat.id; }).join('|');
           if (seen[key]) return;
@@ -577,6 +599,7 @@
       pick.seats.forEach(function (s) { inRect[s.id] = true; });
 
       pick.seats.forEach(function (s) {
+        delete day.blocked[s.id]; // 空けておいた席を使う場合は、その印を外す
         var m = pick.plan[s.id];
         if (m) {
           day.placements[s.id] = { groupId: group.id, gender: m.gender };
@@ -618,6 +641,9 @@
       opt.frontCapacity = opt.frontCapacity || 0;
       var placedCount = 0;
       var warnedFront = false;
+      var warnedDeep = false;
+      var warnedOdd = false;
+      var warnedSplit = false;
       var guard = 0;
 
       while (placedCount < g.size && guard++ < 60) {
@@ -640,7 +666,7 @@
             if (pick && !warnedFront) {
               warnedFront = true;
               warnings.push({
-                type: 'front-overflow',
+                type: 'front-overflow', level: 'warn',
                 groupId: g.id,
                 message: '前のお席をご希望のグループが多いため、前から3列目まで（お客様が座れるのは' +
                   opt.frontCapacity + '席）に収まりませんでした。お客様' + alpha(g.order + 1) +
@@ -652,41 +678,102 @@
           pick = findRect(left, pad, base) || findRect(left, false, base);
         }
 
-        // 1つのかたまりにできないときは、いちばん大きいかたまりに分けて置く
-        // （分けた断片も、奥行き2列までの形にします）
+        // ここから先は「置けなかったとき」の手当て。
+        // いちばん避けたいのは泣き別れ（グループが離れた席に分かれること）なので、
+        //   ① 形はよいまま1かたまり → ② 前後に長くても1かたまり → ③ 形を崩しても1かたまり
+        //   → ④ どうしても無理なときだけ分割
+        // の順に手を打ちます。
+
+        // ② 前後に長くなってもよいので、1かたまりのまま置く
         if (!pick) {
-          for (var size = left - 1; size >= 1 && !pick; size--) {
-            pick = findRect(size, false, base);
-          }
-          if (pick) {
+          pick = findRect(left, false, merge(base, { allowDeep: true }));
+          if (pick && !warnedDeep) {
+            warnedDeep = true;
             warnings.push({
-              type: 'split',
+              type: 'deep-block', level: 'warn',
               groupId: g.id,
-              message: 'お客様' + alpha(g.order + 1) + '（' + g.size + '名）は、' + g.size +
-                '名がまとまって座れる空きがなかったため、2か所以上に分かれました。'
+              message: '席が混んでいるため、お客様' + alpha(g.order + 1) + '（' + g.size +
+                '名）の席が前後に長くなっています（3列以上）。同じグループはひとつづきになっています。'
             });
           }
         }
 
-        // それでも置けないときだけ、前後に長い形（奥行き3列以上）を許す
+        // ③ 形の決まりを外してでも、1かたまりのまま置く
         if (!pick) {
-          pick = findRect(left, false, merge(base, { allowDeep: true }));
-          for (var dsize = left - 1; dsize >= 1 && !pick; dsize--) {
-            pick = findRect(dsize, false, merge(base, { allowDeep: true }));
-          }
-          if (pick) {
+          pick = findRect(left, false, merge(base, { allowAnyShape: true }));
+          if (pick && !warnedOdd) {
+            warnedOdd = true;
             warnings.push({
-              type: 'deep-block',
+              type: 'odd-shape', level: 'warn',
               groupId: g.id,
-              message: '席が足りず、お客様' + alpha(g.order + 1) + '（' + g.size +
-                '名）の席が前後に長くなっています（3列以上）。'
+              message: '席がほとんど埋まっているため、お客様' + alpha(g.order + 1) + '（' + g.size +
+                '名）の席の形が整いませんでした（縦並びや前後に長い形）。同じグループはひとつづきになっています。'
             });
+          }
+        }
+
+        // ③の2 相席を避けるために空けてあった席も使って、1かたまりのまま置く
+        if (!pick) {
+          pick = findRect(left, false, merge(base, { allowAnyShape: true, ignoreBlocked: true }));
+          if (pick && !warnedOdd) {
+            warnedOdd = true;
+            warnings.push({
+              type: 'odd-shape', level: 'warn',
+              groupId: g.id,
+              message: '席がほとんど埋まっているため、お客様' + alpha(g.order + 1) + '（' + g.size +
+                '名）の席の形が整いませんでした（縦並びや前後に長い形）。同じグループはひとつづきになっています。'
+            });
+          }
+        }
+
+        // ④ 最後の手段：いちばん大きいかたまりに分けて置く（泣き別れ）
+        if (!pick) {
+          for (var size = left - 1; size >= 1 && !pick; size--) {
+            // 分けるときも、男女の並びの決まりは守ります
+            // （ここで外すと、分割は減らないのに男女の並びだけ増えるため）
+            pick = findRect(size, false, base) ||
+                   findRect(size, false, merge(base, { allowDeep: true })) ||
+                   findRect(size, false, merge(base, { allowAnyShape: true })) ||
+                   findRect(size, false, merge(base, { allowAnyShape: true, ignoreBlocked: true }));
+          }
+          if (pick && !warnedSplit) {
+            warnedSplit = true;
+            warnings.push({
+              type: 'split', level: 'error',
+              groupId: g.id,
+              message: '【要確認】お客様' + alpha(g.order + 1) + '（' + g.size +
+                '名）が離れた席に分かれてしまいました。' + g.size +
+                '名がひとつづきに座れる場所がありません。手で直すか、車両・人数の見直しをご検討ください。'
+            });
+          }
+        }
+
+        // ⑤ それでも置けないのは、男女の並びの決まりが理由。
+        // お客様を置き去りにしないため、その決まりだけ外して置きます。
+        // （分割を試したあとに行います。先に外すと、分割は減らないのに男女の並びだけ増えるため）
+        if (!pick) {
+          var loose = merge(base, { allowAnyShape: true, ignoreBlocked: true, ignoreGender: true });
+          pick = findRect(left, false, loose);
+          if (!pick) {
+            for (var gsize = left - 1; gsize >= 1 && !pick; gsize--) {
+              pick = findRect(gsize, false, loose);
+            }
+            if (pick && !warnedSplit) {
+              warnedSplit = true;
+              warnings.push({
+                type: 'split', level: 'error',
+                groupId: g.id,
+                message: '【要確認】お客様' + alpha(g.order + 1) + '（' + g.size +
+                  '名）が離れた席に分かれてしまいました。' + g.size +
+                  '名がひとつづきに座れる場所がありません。手で直すか、車両・人数の見直しをご検討ください。'
+              });
+            }
           }
         }
 
         if (!pick) {
           warnings.push({
-            type: 'no-seat',
+            type: 'no-seat', level: 'error',
             groupId: g.id,
             message: '座席が足りません。お客様' + alpha(g.order + 1) + 'の' + left +
               '名分を置く場所がありませんでした。人数を減らすか、座席の多い車両を選んでください。'
@@ -747,6 +834,37 @@
 
   function assignDay(layout, groups, opt) {
     opt = opt || {};
+    var wantSharing = opt.sharing !== false;
+
+    var day = placeAllGroups(layout, groups, opt, wantSharing);
+
+    // ゆったり配置（相席なし）で席が足りなくなったときは、
+    // 詰めた配置（相席あり）でやり直す。お客様を置き去りにしないことを優先します。
+    if (!wantSharing && day.warnings.some(function (w) { return w.type === 'no-seat'; })) {
+      var retry = placeAllGroups(layout, groups, opt, true);
+      var before = Object.keys(day.placements).length;
+      var after = Object.keys(retry.placements).length;
+      if (after > before) {
+        retry.retriedTight = true;
+        day = retry;
+      }
+    }
+
+    day.shared.forEach(function (sh) {
+      if (sh.mixedGender) {
+        day.warnings.push({
+          type: 'mixed-gender', level: 'warn',
+          message: sh.row + '列目で、別のグループの男女が並んで座っています。' +
+            '席がほぼ埋まっていて、ほかに組み合わせがありませんでした。気になる場合は手で入れ替えてください。'
+        });
+      }
+    });
+
+    return day;
+  }
+
+  /** 1日ぶんを、指定した詰め方（相席あり／なし）で実際に置く */
+  function placeAllGroups(layout, groups, opt, sharing) {
     var startIndex = Math.max(0, Number(opt.startIndex) || 0);
     var frontStartIndex = Math.max(0, Number(opt.frontStartIndex) || 0);
     var warnings = [];
@@ -755,7 +873,7 @@
       startIndex: startIndex,
       frontStartIndex: frontStartIndex,
       shifted: startIndex > 0 || frontStartIndex > 0,
-      sharing: opt.sharing !== false, // true = 席が窮屈なので相席もありうる
+      sharing: sharing, // true = 席が窮屈なので相席もありうる
       placements: {},
       reserved: {},
       blocked: {},
@@ -779,24 +897,43 @@
 
     refreshDay(layout, day);
 
-    // 置くときは2回に分けたが、結果としてつながっていた場合は「分かれました」を取り消す
+    // 置くときは2回に分けたが、結果としてつながっていた場合は「分かれました」を取り下げる。
+    // ただし、つながった形が縦長などになっていれば、その注意に置きかえます。
     var blockCount = {};
-    day.blocks.forEach(function (b) { blockCount[b.groupId] = (blockCount[b.groupId] || 0) + 1; });
+    var blockOf = {};
+    day.blocks.forEach(function (b) {
+      blockCount[b.groupId] = (blockCount[b.groupId] || 0) + 1;
+      blockOf[b.groupId] = b;
+    });
     for (var wi = warnings.length - 1; wi >= 0; wi--) {
-      if (warnings[wi].type === 'split' && (blockCount[warnings[wi].groupId] || 0) <= 1) {
-        warnings.splice(wi, 1);
+      var w0 = warnings[wi];
+      if (w0.type !== 'split' || (blockCount[w0.groupId] || 0) > 1) continue;
+
+      var b0 = blockOf[w0.groupId];
+      var g0 = groups.filter(function (x) { return x.id === w0.groupId; })[0];
+      var okShape = true;
+      if (b0) {
+        var hh0 = b0.row1 - b0.row0 + 1;
+        var ww0 = b0.col1 - b0.col0 + 1;
+        okShape = shapeAllowed(ww0, hh0, false);
+      }
+      if (okShape || !g0) {
+        warnings.splice(wi, 1); // きれいにつながったので、注意は不要
+      } else {
+        // つながってはいるが、縦長など形が崩れている
+        warnings[wi] = {
+          type: 'odd-shape', level: 'warn', groupId: w0.groupId,
+          message: '席がほとんど埋まっているため、お客様' + alpha(g0.order + 1) + '（' + g0.size +
+            '名）の席の形が整いませんでした（縦並びや前後に長い形）。同じグループはひとつづきになっています。'
+        };
       }
     }
-
-    day.shared.forEach(function (sh) {
-      if (sh.mixedGender) {
-        warnings.push({
-          type: 'mixed-gender',
-          message: sh.row + '列目で、別のグループの男女が並んで座っています。' +
-            '席がほぼ埋まっていて、ほかに組み合わせがありませんでした。気になる場合は手で入れ替えてください。'
-        });
-      }
-    });
+    // 同じ内容の注意が重ならないようにする
+    var wseen = {};
+    for (var wj = warnings.length - 1; wj >= 0; wj--) {
+      var kk = warnings[wj].type + '|' + warnings[wj].message;
+      if (wseen[kk]) warnings.splice(wj, 1); else wseen[kk] = true;
+    }
 
     return day;
   }
@@ -943,7 +1080,7 @@
       });
       if (out.length) {
         issues.push({
-          type: 'front-out', groupId: g.id,
+          type: 'front-out', level: 'warn', groupId: g.id,
           message: nameOf(g) + '（前席オプション）が' + (FRONT_ROWS + 1) + '列目以降にいます。'
         });
       }
@@ -953,7 +1090,7 @@
     (day.shared || []).forEach(function (sh) {
       if (!sh.mixedGender) return;
       issues.push({
-        type: 'mixed-gender', row: sh.row,
+        type: 'mixed-gender', level: 'warn', row: sh.row,
         message: sh.row + '列目で男女が相席になっています。'
       });
     });
@@ -966,8 +1103,8 @@
     Object.keys(blockCount).forEach(function (gid) {
       if (blockCount[gid] > 1 && byId[gid]) {
         issues.push({
-          type: 'split', groupId: gid,
-          message: nameOf(byId[gid]) + 'の席が' + blockCount[gid] + 'か所に分かれています。'
+          type: 'split', level: 'error', groupId: gid,
+          message: '【要確認】' + nameOf(byId[gid]) + 'の席が' + blockCount[gid] + 'か所に分かれています。'
         });
       }
     });
@@ -978,12 +1115,12 @@
       var width = b.col1 - b.col0 + 1;
       if (depth > MAX_DEPTH && byId[b.groupId]) {
         issues.push({
-          type: 'deep-block', groupId: b.groupId,
+          type: 'deep-block', level: 'warn', groupId: b.groupId,
           message: nameOf(byId[b.groupId]) + 'の席が前後' + depth + '列に伸びています。'
         });
       } else if (depth >= 2 && width < 2 && byId[b.groupId]) {
         issues.push({
-          type: 'vertical-pair', groupId: b.groupId,
+          type: 'vertical-pair', level: 'warn', groupId: b.groupId,
           message: nameOf(byId[b.groupId]) + 'の席が縦に並んでいます（横並びが基本です）。'
         });
       }
@@ -994,7 +1131,7 @@
       var seats = (day.seatsOfGroup && day.seatsOfGroup[g.id]) || [];
       if (seats.length !== g.size) {
         issues.push({
-          type: 'seat-count', groupId: g.id,
+          type: 'seat-count', level: 'error', groupId: g.id,
           message: nameOf(g) + '（' + g.size + '名）の席が' + seats.length + '席しかありません。'
         });
       }
@@ -1004,7 +1141,7 @@
     layout.seats.forEach(function (s) {
       if (s.isCrew && day.placements[s.id]) {
         issues.push({
-          type: 'crew-seat', seatId: s.id,
+          type: 'crew-seat', level: 'error', seatId: s.id,
           message: s.row + '列目の業務席にお客様が座っています。'
         });
       }
@@ -1018,6 +1155,11 @@
       seen[key] = true;
       return true;
     });
+
+    // 重いもの（泣き別れ等）を先に並べる
+    var weight = { error: 0, warn: 1 };
+    function rank(x) { return weight[x.level] === undefined ? 1 : weight[x.level]; }
+    issues.sort(function (a, b) { return rank(a) - rank(b); });
 
     // 自動で割り当てた時点から出ていた注意には印を付ける
     // （手で直したせいで出たものと区別するため）
