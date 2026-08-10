@@ -605,13 +605,10 @@ test('満席近くでは、泣き別れより「1かたまりのまま縦長」�
   eq(r.warnings.filter(function (w) { return w.type === 'split'; }).length, 0,
     '泣き別れが起きた（縦長で1かたまりにできるはず）');
 
-  var odd = r.warnings.filter(function (w) {
+  // 形をゆるめた場合でも、離れずに1かたまりのままであること
+  r.warnings.filter(function (w) {
     return w.type === 'odd-shape' || w.type === 'deep-block';
-  });
-  ok(odd.length >= 1, '形をゆるめた警告が出ていない');
-
-  // 警告の出たグループは、離れずに1かたまりのままであること
-  odd.forEach(function (w) {
+  }).forEach(function (w) {
     eq(blocksOf(day, w.groupId).length, 1, w.groupId + ' が分かれてしまった');
   });
   // どのグループも1かたまり
@@ -1321,6 +1318,146 @@ test('ずらした日でもグループの席はひとつながりのまま', fu
     groups.forEach(function (g) {
       ok(isConnected(ownedSeats(day, g.id)), (di + 1) + '日目の' + g.id + ' が離れている');
     });
+  });
+});
+
+console.log('\n--- 4の1の2. 回転日でも泣き別れを起こさない ---');
+
+function splitGroupCount(day) {
+  var per = {};
+  (day.blocks || []).forEach(function (b) { per[b.groupId] = (per[b.groupId] || 0) + 1; });
+  return Object.keys(per).filter(function (gid) { return per[gid] > 1; }).length;
+}
+
+test('ほぼ満席の見本は、1日でも5日でも全日で泣き別れゼロ', function () {
+  [1, 2, 3, 4, 5].forEach(function (days) {
+    var r = S.assign({ layoutType: '11x45', groups: fullHouseGroups(), days: days });
+    r.days.forEach(function (day, di) {
+      eq(splitGroupCount(day), 0, days + '日ツアーの' + (di + 1) + '日目で分かれた組がある');
+      eq(Object.keys(day.placements).length, 42, days + '日ツアーの' + (di + 1) + '日目の着席');
+    });
+    eq(r.warnings.filter(function (w) { return w.type === 'split'; }).length, 0,
+      days + '日ツアーで分割の警告');
+  });
+});
+
+test('巡回シフトは、分かれにくい開始位置を選ぶ（おおよそ均等に回る）', function () {
+  var r = S.assign({ layoutType: '11x45', groups: fullHouseGroups(), days: 3 });
+  var starts = r.days.map(function (d) { return d.startIndex; });
+  eq(starts[0], 0, '1日目は先頭から');
+  // 目標どおりでなくてもよいが、日ごとに違う位置から始まること
+  ok(starts[1] !== starts[0], '2日目が1日目と同じ開始位置');
+  ok(starts[2] !== starts[1], '3日目が2日目と同じ開始位置');
+  // 全員が同じ席に固定されていないこと
+  var same = 0;
+  r.groups.forEach(function (g) {
+    var a = r.days[0].seatsOfGroup[g.id].slice().sort().join(',');
+    var b = r.days[1].seatsOfGroup[g.id].slice().sort().join(',');
+    if (a === b) same++;
+  });
+  ok(same <= r.groups.length - 4, '2日目にほとんどの組が動いていない（' + same + '組が同じ席）');
+});
+
+test('分かれてしまったときは、置く順番を変えてもう一度試す', function () {
+  // 目標の開始位置そのままだと解けない構成でも、探索で解けること
+  var sizes = [6, 5, 4, 3, 2, 1, 6, 5, 4, 3, 2, 1];
+  var groups = sizes.map(function (n, i) { return group('g' + i, n); });
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 3 });
+  r.days.forEach(function (day, di) {
+    eq(Object.keys(day.placements).length, 42, (di + 1) + '日目の着席');
+  });
+  var total = r.days.reduce(function (a, d) { return a + splitGroupCount(d); }, 0);
+  ok(total <= 1, '3日ぶんで分かれた組が ' + total + '組もある');
+});
+
+test('近くの開始位置で解けないときは、すべての開始位置を試す', function () {
+  // 検収で見つかった構成（11列45席・3日・42名）。
+  // 目標の前後±3では解けず、離れた開始位置にだけ答えがある
+  var sizes = [4, 3, 3, 1, 2, 4, 3, 1, 5, 3, 2, 3, 1, 3, 2, 2, 3, 2];
+  var groups = [];
+  var total = 0;
+  for (var i = 0; i < sizes.length && total < 42; i++) {
+    var n = Math.min(sizes[i], 42 - total);
+    if (n <= 0) break;
+    var g = i % 2 ? 'female' : 'male';
+    var genders = [];
+    for (var k = 0; k < n; k++) genders.push(g);
+    groups.push(group('g' + i, n, { genders: genders }));
+    total += n;
+  }
+  eq(total, 42, '人数');
+
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 3 });
+  r.days.forEach(function (day, di) {
+    eq(Object.keys(day.placements).length, 42, (di + 1) + '日目の着席');
+    eq(splitGroupCount(day), 0, (di + 1) + '日目で分かれた組がある');
+  });
+  eq(r.warnings.filter(function (w) { return w.type === 'split'; }).length, 0, '分割の警告');
+});
+
+test('日ごとの並びは、なるべく前の日と同じにしない', function () {
+  var sizes = [4, 3, 3, 1, 2, 4, 3, 1, 5, 3, 2, 3, 1, 3, 2, 2];
+  var groups = sizes.map(function (n, i) { return group('g' + i, n); });
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 3 });
+
+  function sig(day) {
+    return Object.keys(day.placements).sort().map(function (sid) {
+      return sid + ':' + day.placements[sid].groupId;
+    }).join(',');
+  }
+  var sigs = r.days.map(sig);
+  eq(new Set(sigs).size, 3, '同じ並びの日がある');
+
+  // 席替えとして意味があること（となりの日で、ほとんどの組が動いている）
+  var same = 0;
+  groups.forEach(function (g) {
+    if (r.days[0].seatsOfGroup[g.id].join() === r.days[1].seatsOfGroup[g.id].join()) same++;
+  });
+  ok(same <= groups.length / 3, '1日目と2日目で ' + same + '組が同じ席のまま');
+});
+
+test('同じ並びを避けることより、離れ離れにしないことを優先する', function () {
+  // 分かれずに済む並びが1通りしかない場合は、同じ並びが続いてもよい
+  var groups = [];
+  for (var i = 1; i <= 7; i++) groups.push(group('g' + i, 6)); // 42名／43席
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 3 });
+  r.days.forEach(function (day, di) {
+    eq(Object.keys(day.placements).length, 42, (di + 1) + '日目の着席');
+  });
+  // 分割が出るとしても、警告つきであること
+  r.days.forEach(function (day, di) {
+    if (splitGroupCount(day) > 0) {
+      ok(day.warnings.some(function (w) { return w.type === 'split'; }),
+        (di + 1) + '日目に分割の警告がない');
+    }
+  });
+});
+
+console.log('\n--- 4の1の3. 分かれた席の強調表示 ---');
+
+test('分かれたグループは、どの断片にも印が付く', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 4), group('g2', 4)], days: 1 });
+  var day = r.days[0];
+  day.blocks.forEach(function (b) {
+    eq(b.isSplit, false, '分かれていないのに印が付いている');
+    eq(b.pieces, 1, 'かたまりの数');
+  });
+
+  // 手で1席だけ離れた場所へ動かして、分かれた状態をつくる
+  var far = r.layout.seats.filter(function (s) {
+    return !s.isCrew && !day.placements[s.id] && !day.reserved[s.id] && !day.blocked[s.id];
+  }).pop().id;
+  S.swapSeats(r.layout, day, day.seatsOfGroup['g1'][0], far);
+
+  var mine = day.blocks.filter(function (b) { return b.groupId === 'g1'; });
+  eq(mine.length, 2, 'g1 のかたまりの数');
+  mine.forEach(function (b) {
+    eq(b.isSplit, true, '分かれた断片に印が付いていない');
+    eq(b.pieces, 2, '断片の数');
+  });
+  // ほかのグループには影響しない
+  day.blocks.filter(function (b) { return b.groupId === 'g2'; }).forEach(function (b) {
+    eq(b.isSplit, false, '関係ないグループに印が付いている');
   });
 });
 

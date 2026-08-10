@@ -272,6 +272,19 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 .blk.c9 { border-color: var(--c9-line); }
 .blk.is-picked { border-color: var(--error); z-index: 5; }
 
+/* 席が2か所以上に分かれてしまったグループ（いちばん重い問題）は赤い太枠で強調 */
+.blk.is-split { border-color: var(--error) !important; z-index: 6; }
+.blk.is-split.bt { border-top-width: 5px; }
+.blk.is-split.br { border-right-width: 5px; }
+.blk.is-split.bb { border-bottom-width: 5px; }
+.blk.is-split.bl { border-left-width: 5px; }
+.blk-label-wrap.is-split { z-index: 7; }
+.block-label.is-split {
+  background: var(--error-bg); color: var(--error);
+  box-shadow: 0 0 0 2px var(--error); white-space: normal;
+}
+.block-split-mark { display: block; font-size: .68rem; line-height: 1.2; font-weight: 700; }
+
 /* ラベルは中央だが、席の右下すみ（男女の印）の帯を避けて少し上に寄せる */
 .blk-label-wrap {
   position: relative; pointer-events: none; z-index: 4;

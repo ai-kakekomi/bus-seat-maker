@@ -422,6 +422,8 @@
     (day.blocks || []).forEach(function (b) {
       var color = result.colors[b.groupId];
       var picked = b.groupId === selectedGroup ? ' is-picked' : '';
+      // 席が2か所以上に分かれてしまったグループは、赤い太枠ですぐ分かるようにする
+      if (b.isSplit) picked += ' is-split';
 
       b.cells.forEach(function (c) {
         var line = el('div', 'blk c' + color + picked +
@@ -440,17 +442,31 @@
         wrap.appendChild(bridge);
       });
 
+      // 分かれた2つ目以降の断片には、そこにも印を出す
+      if (b.isSplit && labelDone[b.groupId] && b.label) {
+        var mark = el('div', 'blk-label-wrap is-split');
+        mark.style.gridRow = b.label.row0 + ' / ' + (b.label.row1 + 1);
+        mark.style.gridColumn = b.label.trackStart + ' / ' + (b.label.trackEnd + 1);
+        var l2 = labels[b.groupId];
+        var tag2 = el('span', 'block-label is-split');
+        tag2.appendChild(el('span', 'block-name', l2 ? l2.label : ''));
+        tag2.appendChild(el('span', 'block-split-mark', '分かれた席'));
+        mark.appendChild(tag2);
+        wrap.appendChild(mark);
+      }
+
       // ラベルは、かたまりの中でいちばん広いところに1回だけ
       if (!labelDone[b.groupId] && b.label) {
         labelDone[b.groupId] = true;
         var l = labels[b.groupId];
         if (l) {
-          var wrapL = el('div', 'blk-label-wrap');
+          var wrapL = el('div', 'blk-label-wrap' + (b.isSplit ? ' is-split' : ''));
           wrapL.style.gridRow = b.label.row0 + ' / ' + (b.label.row1 + 1);
           wrapL.style.gridColumn = b.label.trackStart + ' / ' + (b.label.trackEnd + 1);
-          var tag = el('span', 'block-label');
+          var tag = el('span', 'block-label' + (b.isSplit ? ' is-split' : ''));
           tag.appendChild(el('span', 'block-name', l.label));
           tag.appendChild(el('span', 'block-count', l.sizeMark + '名'));
+          if (b.isSplit) tag.appendChild(el('span', 'block-split-mark', '席が' + b.pieces + 'か所に分かれています'));
           wrapL.appendChild(tag);
           wrap.appendChild(wrapL);
         }

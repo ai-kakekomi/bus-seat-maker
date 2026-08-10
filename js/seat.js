@@ -924,6 +924,20 @@
     var frontGroups = rotate(groups.filter(function (g) { return g.frontOption; }), frontStartIndex);
     var restGroups = rotate(groups.filter(function (g) { return !g.frontOption; }), startIndex);
     var ordered = frontGroups.concat(restGroups);
+
+    // 置く順番を指定されているときは、そちらを使う（分かれてしまった組を先に置き直すため）
+    if (opt.orderOverride) {
+      var pos = {};
+      opt.orderOverride.forEach(function (id, i) { pos[id] = i; });
+      ordered = ordered.slice().sort(function (a, b) {
+        var pa = pos[a.id] === undefined ? 9999 : pos[a.id];
+        var pb = pos[b.id] === undefined ? 9999 : pos[b.id];
+        return pa - pb;
+      });
+      // 前席オプションの組は、やはり先に置く（前3列を確保するため）
+      ordered = ordered.filter(function (g) { return g.frontOption; })
+        .concat(ordered.filter(function (g) { return !g.frontOption; }));
+    }
     day.groupOrder = ordered.map(function (g) { return g.id; });
 
     ordered.forEach(function (g) {
@@ -971,6 +985,107 @@
     }
 
     return day;
+  }
+
+  /** その日の出来ばえ。小さいほど良い（席にあぶれない ＞ 分かれない ＞ 男女が並ばない） */
+  function dayScore(groups, day) {
+    var seated = Object.keys(day.placements).length;
+    var want = groups.reduce(function (a, g) { return a + g.size; }, 0);
+    var blockCount = {};
+    day.blocks.forEach(function (b) { blockCount[b.groupId] = (blockCount[b.groupId] || 0) + 1; });
+    var split = 0;
+    Object.keys(blockCount).forEach(function (gid) { if (blockCount[gid] > 1) split += blockCount[gid] - 1; });
+    var mixed = day.shared.filter(function (sh) { return sh.mixedGender; }).length;
+    var odd = day.warnings.filter(function (w) {
+      return w.type === 'odd-shape' || w.type === 'deep-block';
+    }).length;
+    return (want - seated) * 10000 + split * 100 + mixed * 5 + odd;
+  }
+
+  /** 分かれてしまった組を先に置き直して、解けるかどうかもう一度試す */
+  function repackSplits(layout, groups, opt, day) {
+    var blockCount = {};
+    day.blocks.forEach(function (b) { blockCount[b.groupId] = (blockCount[b.groupId] || 0) + 1; });
+    var splitIds = Object.keys(blockCount).filter(function (gid) { return blockCount[gid] > 1; });
+    if (splitIds.length === 0) return day;
+
+    var order = splitIds.concat(day.groupOrder.filter(function (id) {
+      return splitIds.indexOf(id) < 0;
+    }));
+    var retry = assignDay(layout, groups, {
+      startIndex: day.startIndex,
+      frontStartIndex: day.frontStartIndex,
+      sharing: opt.sharing,
+      orderOverride: order
+    });
+    return dayScore(groups, retry) < dayScore(groups, day) ? retry : day;
+  }
+
+  /**
+   * その日の座席表を作る。
+   * 巡回シフトの開始位置は「だいたい1/日数ずつ回る」ことが目的なので、
+   * 目標の前後も試して、いちばん分かれにくい開始位置を選びます。
+   * （公平さの厳密さより、グループが離れ離れにならないことを優先）
+   */
+  /** その日の座席の並びを、見分けるための文字列にする（前の日と同じかどうかの判定用） */
+  function daySignature(day) {
+    return Object.keys(day.placements).sort().map(function (sid) {
+      return sid + ':' + day.placements[sid].groupId;
+    }).join(',');
+  }
+
+  function buildBestDay(layout, groups, opt, target, rotatingCount) {
+    function make(startIndex) {
+      var day = assignDay(layout, groups, {
+        startIndex: startIndex,
+        frontStartIndex: opt.frontStartIndex,
+        sharing: opt.sharing
+      });
+      return repackSplits(layout, groups, opt, day);
+    }
+
+    // 前の日と同じ並びは避けたい（席替えの意味がなくなるため）。
+    // ただし「分かれてしまう」ほうがずっと重い問題なので、重みは小さくしています。
+    var seenDays = opt.previousSignatures || [];
+    function evaluate(day, startIndex) {
+      var sc = dayScore(groups, day);
+      // 前の日とそっくり同じ並びは、席替えの意味がなくなるので大きく避ける。
+      // ただし「離れ離れ（分割 ＝ 100点）」よりは軽い扱いにします。
+      if (seenDays.indexOf(daySignature(day)) >= 0) sc += 40;
+      var dist = Math.min(
+        Math.abs(startIndex - target),
+        rotatingCount - Math.abs(startIndex - target)
+      );
+      return sc + dist * 0.01; // 同じ出来ばえなら、目標に近い開始位置を選ぶ
+    }
+
+    var best = make(target);
+    var bestScore = evaluate(best, target);
+    if (bestScore === 0 || rotatingCount <= 1) return best;
+
+    // 試す順番：目標のすぐ近く（±3組）→ それでもだめなら全部の開始位置
+    // 「だいたい均等に回る」ことより、グループが離れ離れにならないことを優先します
+    var order = [];
+    var seen = {};
+    seen[target] = true;
+    [1, -1, 2, -2, 3, -3].forEach(function (o) {
+      var idx = ((target + o) % rotatingCount + rotatingCount) % rotatingCount;
+      if (!seen[idx]) { seen[idx] = true; order.push(idx); }
+    });
+    for (var k = 0; k < rotatingCount; k++) {
+      if (!seen[k]) { seen[k] = true; order.push(k); }
+    }
+
+    for (var i = 0; i < order.length; i++) {
+      var cand = make(order[i]);
+      var sc = evaluate(cand, order[i]);
+      if (sc < bestScore) {
+        best = cand;
+        bestScore = sc;
+        if (bestScore === 0) break; // 文句なしの並びが見つかった
+      }
+    }
+    return best;
   }
 
   function rotate(list, k) {
@@ -1527,6 +1642,14 @@
       });
     });
 
+    // 同じグループが2か所以上に分かれている場合は、どの断片にも印を付ける
+    var perGroup = {};
+    blocks.forEach(function (b) { perGroup[b.groupId] = (perGroup[b.groupId] || 0) + 1; });
+    blocks.forEach(function (b) {
+      b.pieces = perGroup[b.groupId];
+      b.isSplit = perGroup[b.groupId] > 1;
+    });
+
     blocks.sort(function (a, b) { return a.row0 - b.row0 || a.col0 - b.col0; });
     return blocks;
 
@@ -1761,11 +1884,11 @@
 
     var days = [];
     for (var d = 0; d < dayCount; d++) {
-      var day = assignDay(layout, groups, {
-        startIndex: startIndexForDay(rotating, d, dayCount),
+      var day = buildBestDay(layout, groups, {
         frontStartIndex: startIndexForDay(frontRotating, d, dayCount),
-        sharing: sharing
-      });
+        sharing: sharing,
+        previousSignatures: days.map(daySignature)
+      }, startIndexForDay(rotating, d, dayCount), rotating.length);
       day.dayIndex = d;
       // 自動で割り当てた直後の状態を「もともとの注意」として控えておく
       day.baselineIssues = inspectDay(layout, groups, day).map(issueKey);
@@ -1836,6 +1959,7 @@
     normalizeGroups: normalizeGroups,
     shouldAvoidSharing: shouldAvoidSharing,
     startIndexForDay: startIndexForDay,
+    dayScore: dayScore,
     assignDay: assignDay,
     assign: assign,
     resolveLabels: resolveLabels,

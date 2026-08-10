@@ -101,6 +101,18 @@
   .blk.bl { border-left-width: .7mm; }
   .blk.is-picked { border-color: inherit; }
 
+  /* 分かれてしまったグループは、印刷でも赤い太枠で目立たせる */
+  .blk.is-split { border-color: #c00000 !important; border-style: solid !important; }
+  .blk.is-split.bt { border-top-width: 1.4mm !important; }
+  .blk.is-split.br { border-right-width: 1.4mm !important; }
+  .blk.is-split.bb { border-bottom-width: 1.4mm !important; }
+  .blk.is-split.bl { border-left-width: 1.4mm !important; }
+  .block-label.is-split {
+    background: #ffe8e6 !important; color: #a00000 !important;
+    box-shadow: 0 0 0 .3mm #c00000; white-space: normal;
+  }
+  .block-split-mark { font-size: 6.6pt; }
+
   .blk.c0 { border-color: #8a6d00 !important; border-style: solid; }
   .blk.c1 { border-color: #23527c !important; border-style: dashed; }
   .blk.c2 { border-color: #96324a !important; border-style: solid; }
