@@ -16,11 +16,13 @@
     startDate: '',
     layoutType: '11x45',
     useRealName: false,
+    editMode: 'group', // 'group' = グループごと動かす / 'seat' = 1席ずつ入れ替える
     groups: []
   };
 
-  var result = null;      // BusSeat.assign() の結果
-  var selectedSeat = null; // 入れ替え待ちの席
+  var result = null;       // BusSeat.assign() の結果
+  var selectedSeat = null; // 入れ替え待ちの席（1席ずつモード）
+  var selection = null;    // 動かす相手として選んだグループ（グループごとモード）
 
   /* ---------------- ちいさな道具 ---------------- */
 
@@ -63,6 +65,7 @@
     state.startDate = data.startDate || '';
     state.layoutType = S.LAYOUTS[data.layoutType] ? data.layoutType : '11x45';
     state.useRealName = !!data.useRealName;
+    state.editMode = data.editMode === 'seat' ? 'seat' : 'group';
     state.groups = (data.groups || []).map(function (g) {
       var size = Math.max(1, Number(g.size) || 1);
       var members = [];
@@ -207,6 +210,7 @@
   /* ---------------- 割り当てと描画 ---------------- */
 
   function recompute() {
+    selection = null;
     result = S.assign({
       layoutType: state.layoutType,
       groups: state.groups,
@@ -306,45 +310,65 @@
 
   /**
    * 座席表は5本の縦すじ（左2席・通路・右2席）のマス目で描きます。
-   * グループを囲む四角（ブロック）は、そのマス目にまたがる枠として上に重ねます。
+   * グループを囲む枠は、そのマス目の上に重ねた「辺だけの線」で、形の外周をなぞります。
+   * 四角でもL字でも同じやり方で囲めます。
    */
   function busTable(day, dayIndex, labels) {
     var layout = result.layout;
     var wrap = el('div', 'bus');
+    var selectedGroup = selection && selection.dayIndex === dayIndex ? selection.groupId : null;
 
     // 座席のマス
     layout.seats.forEach(function (seat) {
-      var cell = seatCell(seat, day, dayIndex);
+      var cell = seatCell(seat, day, dayIndex, selectedGroup);
       cell.style.gridRow = String(seat.row);
       cell.style.gridColumn = String(S.trackOf(layout, seat.row, seat.col));
       wrap.appendChild(cell);
     });
 
-    // グループを囲む四角（1グループにつき1つ。分かれたときだけ複数）
+    // グループを囲む枠（形の外周をなぞる）
     var labelDone = {};
     (day.blocks || []).forEach(function (b) {
       var color = result.colors[b.groupId];
-      var box = el('div', 'block c' + color);
-      box.style.gridRow = b.row0 + ' / ' + (b.row1 + 1);
-      box.style.gridColumn = b.trackStart + ' / ' + (b.trackEnd + 1);
+      var picked = b.groupId === selectedGroup ? ' is-picked' : '';
 
-      // ラベルはブロックの中に1回だけ
-      if (!labelDone[b.groupId]) {
+      b.cells.forEach(function (c) {
+        var line = el('div', 'blk c' + color + picked +
+          (c.top ? ' bt' : '') + (c.right ? ' br' : '') +
+          (c.bottom ? ' bb' : '') + (c.left ? ' bl' : ''));
+        line.style.gridRow = String(c.row);
+        line.style.gridColumn = String(c.track);
+        wrap.appendChild(line);
+      });
+
+      // 通路をまたいでつながっている行は、通路のすじにも線を渡す
+      (b.bridges || []).forEach(function (br) {
+        var bridge = el('div', 'blk c' + color + picked + ' bt bb');
+        bridge.style.gridRow = String(br.row);
+        bridge.style.gridColumn = String(br.track);
+        wrap.appendChild(bridge);
+      });
+
+      // ラベルは、かたまりの中でいちばん広いところに1回だけ
+      if (!labelDone[b.groupId] && b.label) {
         labelDone[b.groupId] = true;
         var l = labels[b.groupId];
         if (l) {
+          var wrapL = el('div', 'blk-label-wrap');
+          wrapL.style.gridRow = b.label.row0 + ' / ' + (b.label.row1 + 1);
+          wrapL.style.gridColumn = b.label.trackStart + ' / ' + (b.label.trackEnd + 1);
           var tag = el('span', 'block-label');
           tag.appendChild(el('span', 'block-name', l.label));
           tag.appendChild(el('span', 'block-count', l.sizeMark + '名'));
-          box.appendChild(tag);
+          wrapL.appendChild(tag);
+          wrap.appendChild(wrapL);
         }
       }
-      wrap.appendChild(box);
     });
 
     // 使われていない後方は、まとめて「自由席」
     if (day.freeArea) {
-      var free = el('div', 'block block-free');
+      var free = el('div', 'blk-free');
       free.style.gridRow = day.freeArea.row0 + ' / ' + (day.freeArea.row1 + 1);
       free.style.gridColumn = '1 / 6';
       free.appendChild(el('span', 'block-label', '自由席'));
@@ -354,7 +378,7 @@
     return wrap;
   }
 
-  function seatCell(seat, day, dayIndex) {
+  function seatCell(seat, day, dayIndex, selectedGroup) {
     var cell = el('div', 'seat');
     cell.appendChild(el('span', 'row-no', seat.row + '-' + seat.col));
 
@@ -371,10 +395,14 @@
       cell.className += ' g' + result.colors[p.groupId];
       var mark = p.gender === 'male' ? '男' : (p.gender === 'female' ? '女' : '');
       cell.appendChild(el('span', 'seat-mark', mark));
+      if (selectedGroup && p.groupId === selectedGroup) cell.className += ' is-picked-seat';
     } else if (reservedBy) {
+      // 枠の中の空席（そのグループのために取ってある席）
       cell.className += ' g' + result.colors[reservedBy] + ' is-empty';
       cell.appendChild(el('span', 'seat-mark', '空'));
+      if (selectedGroup && reservedBy === selectedGroup) cell.className += ' is-picked-seat';
     } else {
+      // 枠の外の空席（相席を避けるために空けてある席も、見た目はふつうの空席）
       cell.className += ' is-empty';
       cell.appendChild(el('span', 'seat-mark', '空'));
     }
@@ -387,18 +415,67 @@
     return cell;
   }
 
+  /* ---------------- 座席をタップしたとき ---------------- */
+
+  function ownerAt(day, seatId) {
+    var p = day.placements[seatId];
+    if (p) return p.groupId;
+    return (day.reserved || {})[seatId] || null;
+  }
+
   function onSeatClick(dayIndex, seatId) {
-    if (!selectedSeat) {
+    if (state.editMode === 'seat') return onSeatModeClick(dayIndex, seatId);
+    return onGroupModeClick(dayIndex, seatId);
+  }
+
+  // グループごと動かすモード
+  function onGroupModeClick(dayIndex, seatId) {
+    var day = result.days[dayIndex];
+    var owner = ownerAt(day, seatId);
+
+    if (!selection || selection.dayIndex !== dayIndex) {
+      if (!owner) {
+        flash('先に、動かしたいグループの席をタップしてください。');
+        return;
+      }
+      selection = { dayIndex: dayIndex, groupId: owner };
+      renderSheets();
+      return;
+    }
+
+    if (owner === selection.groupId) { // 同じグループをもう一度 → 取り消し
+      selection = null;
+      renderSheets();
+      return;
+    }
+
+    var res = owner
+      ? S.swapGroups(result.layout, result.groups, day, selection.groupId, owner)
+      : S.moveGroup(result.layout, result.groups, day, selection.groupId, seatId);
+
+    flash(res.ok ? (res.message || '動かしました。') : res.message);
+    if (res.ok) selection = null;
+    renderSheets();
+  }
+
+  // 1席ずつ入れ替えるモード
+  function onSeatModeClick(dayIndex, seatId) {
+    if (!selectedSeat || selectedSeat.dayIndex !== dayIndex) {
       selectedSeat = { dayIndex: dayIndex, seatId: seatId };
-    } else if (selectedSeat.dayIndex === dayIndex && selectedSeat.seatId === seatId) {
+    } else if (selectedSeat.seatId === seatId) {
       selectedSeat = null;
-    } else if (selectedSeat.dayIndex !== dayIndex) {
-      selectedSeat = { dayIndex: dayIndex, seatId: seatId };
     } else {
       S.swapSeats(result.layout, result.days[dayIndex], selectedSeat.seatId, seatId);
       selectedSeat = null;
     }
     renderSheets();
+  }
+
+  function flash(text) {
+    var box = $('flash');
+    if (!box) return;
+    box.textContent = text || '';
+    box.style.display = text ? 'block' : 'none';
   }
 
   /* ---------------- 見本 ---------------- */
@@ -470,6 +547,8 @@
     $('start-date').value = state.startDate;
     $('layout-type').value = state.layoutType;
     $('use-real-name').checked = state.useRealName;
+    $('mode-group').checked = state.editMode !== 'seat';
+    $('mode-seat').checked = state.editMode === 'seat';
     updateLayoutInfo();
   }
 
@@ -493,6 +572,17 @@
       state.layoutType = this.value; updateLayoutInfo(); changed();
     });
     $('use-real-name').addEventListener('change', function () { state.useRealName = this.checked; changed(); });
+
+    ['mode-group', 'mode-seat'].forEach(function (id) {
+      $(id).addEventListener('change', function () {
+        state.editMode = this.value;
+        selection = null;
+        selectedSeat = null;
+        flash('');
+        renderSheets();
+        save();
+      });
+    });
 
     $('add-group').addEventListener('click', function () { addGroup(2); changed(); });
     $('clear-groups').addEventListener('click', function () {

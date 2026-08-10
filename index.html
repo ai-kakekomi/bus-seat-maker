@@ -134,10 +134,25 @@
         <button type="button" class="btn btn-primary" id="assign">自動で席を決める</button>
         <button type="button" class="btn" id="print">印刷する（PDFで保存もできます）</button>
       </div>
-      <p class="swap-hint">
-        <strong>手で直せます。</strong>入れ替えたい席を1つ押して、次に入れ替え先の席を押すと、2つの席が入れ替わります。
-        空いている席とも入れ替えられます。押し間違えたら、同じ席をもう一度押すと取り消せます。
-      </p>
+      <div class="swap-hint">
+        <p class="mode-row">
+          <strong>手で直せます。</strong>直し方を選んでください。
+        </p>
+        <label class="toggle-line">
+          <input type="radio" name="edit-mode" value="group" id="mode-group">
+          <span><strong>グループごと動かす</strong>（おすすめ）<br>
+            <span class="help">動かしたいグループの席をタップ → 行き先をタップ。
+              別のグループをタップすればその組と場所を交換、空席をタップすればそこへ引っ越します。
+              人数が違っても、形を作り直して置き直します。</span></span>
+        </label>
+        <label class="toggle-line">
+          <input type="radio" name="edit-mode" value="seat" id="mode-seat">
+          <span><strong>1席ずつ入れ替える</strong><br>
+            <span class="help">席を1つタップ → 入れ替え先の席をタップ。空席とも入れ替えられます。</span></span>
+        </label>
+        <p class="help">同じところをもう一度タップすると、選び直せます。</p>
+      </div>
+      <p id="flash" class="flash" style="display:none"></p>
       <p class="help">
         入力を変えると自動で決め直します。そのとき<strong>手で直した内容は消えます</strong>ので、
         手直しは最後にしてください。

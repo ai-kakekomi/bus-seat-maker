@@ -42,6 +42,25 @@ function group(id, size, opt) {
 function seatRow(seatId) { return Number(String(seatId).split('-')[0].slice(1)); }
 function seatCol(seatId) { return Number(String(seatId).split('-')[1]); }
 
+// 席がひとつづきか（前後左右のとなり。通路をはさむ左右もとなりとして扱う）
+function isConnected(seatIds) {
+  if (seatIds.length <= 1) return true;
+  var set = {};
+  seatIds.forEach(function (id) { set[seatRow(id) + ',' + seatCol(id)] = true; });
+  var first = seatIds[0];
+  var queue = [[seatRow(first), seatCol(first)]];
+  var seen = {}; seen[queue[0][0] + ',' + queue[0][1]] = true;
+  var n = 1;
+  while (queue.length) {
+    var cur = queue.pop();
+    [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (d) {
+      var k = (cur[0] + d[0]) + ',' + (cur[1] + d[1]);
+      if (set[k] && !seen[k]) { seen[k] = true; n++; queue.push([cur[0] + d[0], cur[1] + d[1]]); }
+    });
+  }
+  return n === seatIds.length;
+}
+
 // グループの席（確保した空席を含む）が、ぴったり四角になっているか
 function blocksOf(day, groupId) {
   return (day.blocks || []).filter(function (b) { return b.groupId === groupId; });
@@ -192,17 +211,77 @@ test('性別が未入力の人は誰とでも相席できる（判定は入力�
   eq(r.warnings.filter(function (w) { return w.type === 'mixed-gender'; }).length, 0, '未入力で警告は出さない');
 });
 
-console.log('\n--- 3の2. グループは大きな四角（ブロック）で囲む ---');
+console.log('\n--- 3の2. グループを囲む枠（四角・L字） ---');
 
-test('各グループの席は四角いブロックになる（斜めに割れない）', function () {
+test('各グループの席はひとつながりになる（斜めだけの接続はしない）', function () {
   var groups = [group('g1', 2), group('g2', 4), group('g3', 3), group('g4', 6), group('g5', 1), group('g6', 5)];
   var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
   var day = r.days[0];
   groups.forEach(function (g) {
     var owned = ownedSeats(day, g.id);
     ok(owned.length >= g.size, g.id + ' の席が足りない');
-    ok(isRectangle(owned), g.id + ' の席が四角になっていない: ' + owned.join(','));
+    ok(isConnected(owned), g.id + ' の席が離れている: ' + owned.join(','));
   });
+  day.blocks.forEach(function (b) {
+    ok(isConnected(b.seatIds), 'ブロックが離れている: ' + b.seatIds.join(','));
+  });
+});
+
+test('3名グループはL字（2席＋となりの1席）で空席ゼロになる', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 3)], days: 1 });
+  var day = r.days[0];
+  var bs = blocksOf(day, 'g1');
+  eq(bs.length, 1, 'ブロック数');
+  eq(bs[0].seatIds.length, 3, '枠に含まれる席数（空席を含めない）');
+  eq(bs[0].people, 3, '枠の中の人数');
+  eq(bs[0].isRect, false, 'L字になっていない（四角のまま）');
+  ok(isConnected(bs[0].seatIds), 'L字がつながっていない');
+  eq(Object.keys(day.reserved).length, 0, '枠の中の取り置き空席');
+});
+
+test('5名グループもL字で空席ゼロになる', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 5)], days: 1 });
+  var bs = blocksOf(r.days[0], 'g1');
+  eq(bs.length, 1, 'ブロック数');
+  eq(bs[0].seatIds.length, 5, '枠に含まれる席数');
+  eq(bs[0].people, 5, '枠の中の人数');
+  ok(isConnected(bs[0].seatIds), 'つながっていない');
+});
+
+test('1名グループの枠は1席ぶん（2人組に見えない）', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 1), group('g2', 1), group('g3', 4)], days: 1 });
+  var day = r.days[0];
+  ['g1', 'g2'].forEach(function (id) {
+    var bs = blocksOf(day, id);
+    eq(bs.length, 1, id + ' のブロック数');
+    eq(bs[0].seatIds.length, 1, id + ' の枠に含まれる席数');
+    eq(bs[0].people, 1, id + ' の枠の中の人数');
+    eq(ownedSeats(day, id).length, 1, id + ' が持っている席数');
+  });
+  // 相席回避のために空けた席は「枠の外」にあること
+  Object.keys(day.blocked).forEach(function (sid) {
+    day.blocks.forEach(function (b) {
+      ok(b.seatIds.indexOf(sid) < 0, '取り置きの空席 ' + sid + ' が枠の中に入っている');
+    });
+    ok(!day.placements[sid], sid + ' に人が座っている');
+  });
+});
+
+test('1名グループでも相席は起きない（となりは空けておく）', function () {
+  var groups = [group('g1', 1, { genders: ['male'] }), group('g2', 1, { genders: ['female'] }),
+                group('g3', 1, { genders: ['female'] }), group('g4', 2)];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  eq(r.sharing, false, '相席モード');
+  eq(r.days[0].shared.length, 0, '相席の数');
+});
+
+test('席が窮屈なときはL字を積極的に使って空席を出さない', function () {
+  var groups = [];
+  for (var i = 1; i <= 14; i++) groups.push(group('g' + i, 3)); // 42名／43席
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  eq(r.sharing, true, '相席モード');
+  eq(Object.keys(r.days[0].placements).length, 42, '座れた人数');
+  eq(Object.keys(r.days[0].reserved).length, 0, '取り置きの空席');
 });
 
 test('4名グループは正方形（2列×2席）または同一列の4席になる', function () {
@@ -212,6 +291,7 @@ test('4名グループは正方形（2列×2席）または同一列の4席に�
     var bs = blocksOf(r.days[0], g.id);
     eq(bs.length, 1, g.id + ' が複数ブロックに割れた');
     var b = bs[0];
+    eq(b.isRect, true, g.id + ' が四角でない');
     var w = b.col1 - b.col0 + 1, h = b.row1 - b.row0 + 1;
     ok((w === 2 && h === 2) || (w === 4 && h === 1), g.id + ' の形が ' + w + '席×' + h + '列');
   });
@@ -226,16 +306,6 @@ test('ブロックは1グループにつき1つ（分割の必要がないとき
   eq(r.warnings.filter(function (w) { return w.type === 'split'; }).length, 0, '分割の警告');
 });
 
-test('端数のグループは四角を保つため空席を確保する（3名なら2席×2列）', function () {
-  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 3)], days: 1 });
-  var day = r.days[0];
-  var owned = ownedSeats(day, 'g1');
-  eq(owned.length, 4, '確保した席数');
-  eq(day.seatsOfGroup['g1'].length, 3, '人が座る席数');
-  eq(Object.keys(day.reserved).length, 1, '四角を保つための空席');
-  ok(isRectangle(owned), '四角になっていない');
-});
-
 test('通路を跨ぐブロックは左右にまたがる1つの枠になる', function () {
   // 1列目は業務席があるので左2席だけ。2列目からの8名グループは 4席×2列（通路を跨ぐ）
   var r = S.assign({ layoutType: '11x45', groups: [group('先', 2), group('g1', 8)], days: 1 });
@@ -245,20 +315,105 @@ test('通路を跨ぐブロックは左右にまたがる1つの枠になる', f
   eq(bs[0].col1, 4, '右端');
   eq(bs[0].trackStart, 1, '描画の左端');
   eq(bs[0].trackEnd, 5, '描画の右端（通路を跨ぐ）');
+  eq(bs[0].bridges.length, 2, '通路をつなぐ線の数（2列ぶん）');
+});
+
+test('ラベルは1ブロックにつき1か所ぶんだけ決まる', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 3), group('g2', 5)], days: 1 });
+  r.days[0].blocks.forEach(function (b) {
+    ok(b.label, b.groupId + ' のラベル位置がない');
+    // ラベルの四角は、そのブロックの中に収まっていること
+    for (var rr = b.label.row0; rr <= b.label.row1; rr++) {
+      for (var cc = b.label.col0; cc <= b.label.col1; cc++) {
+        ok(b.seatIds.indexOf('r' + rr + '-' + cc) >= 0,
+          b.groupId + ' のラベルが枠からはみ出している');
+      }
+    }
+  });
 });
 
 test('席を入れ替えたあともブロックは作り直される', function () {
   var r = S.assign({ layoutType: '11x45', groups: [group('g1', 4), group('g2', 4)], days: 1 });
   var day = r.days[0];
-  var before = blocksOf(day, 'g1').length;
-  eq(before, 1, '入れ替え前');
+  eq(blocksOf(day, 'g1').length, 1, '入れ替え前');
   var a = day.seatsOfGroup['g1'][0];
   var far = r.layout.seats.filter(function (s) {
-    return !s.isCrew && !day.placements[s.id] && !day.reserved[s.id];
+    return !s.isCrew && !day.placements[s.id] && !day.reserved[s.id] && !day.blocked[s.id];
   }).pop().id;
   S.swapSeats(r.layout, day, a, far);
   ok(blocksOf(day, 'g1').length >= 1, '入れ替え後にブロックが無い');
-  ok(day.blocks.every(function (b) { return isRectangle(b.seatIds); }), 'ブロックが四角でない');
+  ok(day.blocks.every(function (b) { return isConnected(b.seatIds); }), 'ブロックがつながっていない');
+});
+
+console.log('\n--- 3の3. グループごと動かす ---');
+
+test('2つのグループの場所を入れ替えられる', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 2), group('g2', 4), group('g3', 2)], days: 1 });
+  var day = r.days[0];
+  var before1 = S.originOfGroup(day, 'g1');
+  var before3 = S.originOfGroup(day, 'g3');
+
+  var res = S.swapGroups(r.layout, r.groups, day, 'g1', 'g3');
+  eq(res.ok, true, '入れ替えの成否: ' + res.message);
+  var after1 = S.originOfGroup(day, 'g1');
+  var after3 = S.originOfGroup(day, 'g3');
+  eq(after1.row, before3.row, 'g1が g3のいた列に来ていない');
+  eq(after3.row, before1.row, 'g3が g1のいた列に来ていない');
+  eq(day.seatsOfGroup['g1'].length, 2, 'g1の人数');
+  eq(day.seatsOfGroup['g3'].length, 2, 'g3の人数');
+});
+
+test('人数が違うグループどうしでも入れ替えられる', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 2), group('g2', 4), group('g3', 5)], days: 1 });
+  var day = r.days[0];
+  var before1 = S.originOfGroup(day, 'g1');
+  var before3 = S.originOfGroup(day, 'g3');
+
+  var res = S.swapGroups(r.layout, r.groups, day, 'g1', 'g3');
+  eq(res.ok, true, '入れ替えの成否: ' + res.message);
+  eq(day.seatsOfGroup['g1'].length, 2, 'g1の人数');
+  eq(day.seatsOfGroup['g3'].length, 5, 'g3の人数');
+  ok(isConnected(ownedSeats(day, 'g3')), 'g3が離れてしまった');
+
+  // 少ない人数のほうは、相手のいた場所にぴったり入る
+  var after1 = S.originOfGroup(day, 'g1');
+  eq(after1.row + '-' + after1.col, before3.row + '-' + before3.col, 'g1がg3のいた場所に来ていない');
+  // 多い人数のほうは、相手のいた場所に入りきらなければ近いところへ
+  var after3 = S.originOfGroup(day, 'g3');
+  ok(after3.row !== before3.row || after3.col !== before3.col, 'g3が動いていない');
+  ok(after3.row >= before1.row, 'g3が元より前に行ってしまった');
+});
+
+test('空いているところへグループを引っ越しできる', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 2), group('g2', 4)], days: 1 });
+  var day = r.days[0];
+  var res = S.moveGroup(r.layout, r.groups, day, 'g1', 'r8-1');
+  eq(res.ok, true, '移動の成否: ' + res.message);
+  var o = S.originOfGroup(day, 'g1');
+  eq(o.row, 8, '移動先の列');
+  eq(o.col, 1, '移動先の席');
+  eq(day.seatsOfGroup['g1'].length, 2, 'g1の人数');
+  ok(isConnected(ownedSeats(day, 'g1')), 'g1が離れてしまった');
+});
+
+test('引っ越し先が使えないときは元のままにする', function () {
+  var groups = [];
+  for (var i = 1; i <= 21; i++) groups.push(group('g' + i, 2)); // 42名／43席でほぼ満席
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  var day = r.days[0];
+  var before = JSON.stringify(day.placements);
+  var res = S.moveGroup(r.layout, r.groups, day, 'g1', 'r2-1'); // すでに埋まっている
+  ok(res.ok === true || res.ok === false, '戻り値がある');
+  if (!res.ok) eq(JSON.stringify(day.placements), before, '失敗したのに座席が変わった');
+  eq(day.seatsOfGroup['g1'].length, 2, 'g1の人数');
+});
+
+test('グループを動かしても、ほかのグループはそのまま', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 2), group('g2', 4), group('g3', 2)], days: 1 });
+  var day = r.days[0];
+  var before2 = day.seatsOfGroup['g2'].slice().sort().join(',');
+  S.moveGroup(r.layout, r.groups, day, 'g1', 'r9-3');
+  eq(day.seatsOfGroup['g2'].slice().sort().join(','), before2, 'g2が動いてしまった');
 });
 
 console.log('\n--- 4. 複数日と巡回シフト ---');
@@ -332,7 +487,47 @@ test('人数がばらばらでもグループは切らずに、人数の割合�
   // グループが分断されていないこと
   r.days.forEach(function (day, di) {
     groups.forEach(function (g) {
-      ok(isRectangle(ownedSeats(day, g.id)), (di + 1) + '日目に' + g.id + 'が分断された');
+      ok(isConnected(ownedSeats(day, g.id)), (di + 1) + '日目に' + g.id + 'が分断された');
+    });
+  });
+});
+
+test('前席オプション組も、前3列のなかで日ごとに巡回する', function () {
+  var groups = [
+    group('f1', 2, { frontOption: true }),
+    group('f2', 2, { frontOption: true }),
+    group('f3', 2, { frontOption: true }),
+    group('g1', 4), group('g2', 4)
+  ];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 3 });
+
+  // 日ごとに前席組の並び順が変わる
+  eq(r.days[0].groupOrder.slice(0, 3).join(','), 'f1,f2,f3', '1日目の前席組');
+  eq(r.days[1].groupOrder.slice(0, 3).join(','), 'f2,f3,f1', '2日目の前席組');
+  eq(r.days[2].groupOrder.slice(0, 3).join(','), 'f3,f1,f2', '3日目の前席組');
+
+  // どの日も、前席組は前から3列目までに収まっている
+  r.days.forEach(function (d, di) {
+    ['f1', 'f2', 'f3'].forEach(function (id) {
+      d.seatsOfGroup[id].forEach(function (sid) {
+        ok(seatRow(sid) <= 3, (di + 1) + '日目に' + id + 'が前3列を出た: ' + sid);
+      });
+    });
+  });
+
+  // f1 は毎日同じ席ではない
+  var f1 = r.days.map(function (d) { return d.seatsOfGroup['f1'].slice().sort().join(','); });
+  ok(f1[0] !== f1[1], 'f1が1日目と2日目で同じ席');
+  ok(f1[1] !== f1[2], 'f1が2日目と3日目で同じ席');
+});
+
+test('前席オプションが1組だけなら実質固定でよい', function () {
+  var groups = [group('f1', 2, { frontOption: true }), group('g1', 4), group('g2', 4)];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 3 });
+  r.days.forEach(function (d, di) {
+    eq(d.frontStartIndex, 0, (di + 1) + '日目の前席組の開始位置');
+    d.seatsOfGroup['f1'].forEach(function (sid) {
+      ok(seatRow(sid) <= 3, (di + 1) + '日目に前3列を出た');
     });
   });
 });
@@ -363,12 +558,12 @@ test('ずらした日も前から詰める（後方に空白の島を作らな�
   });
 });
 
-test('ずらした日でもグループのブロックは四角のまま', function () {
+test('ずらした日でもグループの席はひとつながりのまま', function () {
   var groups = [group('g1', 2), group('g2', 3), group('g3', 4), group('g4', 5), group('g5', 6)];
   var r = S.assign({ layoutType: '11x45', groups: groups, days: 2 });
   r.days.forEach(function (day, di) {
     groups.forEach(function (g) {
-      ok(isRectangle(ownedSeats(day, g.id)), (di + 1) + '日目の' + g.id + ' が四角でない');
+      ok(isConnected(ownedSeats(day, g.id)), (di + 1) + '日目の' + g.id + ' が離れている');
     });
   });
 });

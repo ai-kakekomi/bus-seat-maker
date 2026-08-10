@@ -21,6 +21,7 @@
   .btn,
   .btn-row,
   .swap-hint,
+  .flash,
   #input-pane { display: none !important; }
 
   .wrap { max-width: none; padding: 0; margin: 0; }
@@ -63,22 +64,34 @@
   }
 
   /* グループを囲む枠。白黒印刷でも見分けられるよう線の種類を変える */
-  .block {
-    margin: -.7mm; border-width: .7mm; border-radius: 2mm;
+  .blk {
+    margin: -.7mm; border-radius: 0;
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
+  .blk.bt { border-top-width: .7mm; }
+  .blk.br { border-right-width: .7mm; }
+  .blk.bb { border-bottom-width: .7mm; }
+  .blk.bl { border-left-width: .7mm; }
+  .blk.is-picked { border-color: inherit; }
+
+  .blk.c0 { border-color: #8a6d00 !important; border-style: solid; }
+  .blk.c1 { border-color: #23527c !important; border-style: dashed; }
+  .blk.c2 { border-color: #96324a !important; border-style: solid; }
+  .blk.c3 { border-color: #2c6b2c !important; border-style: dotted; }
+  .blk.c4 { border-color: #5b3e93 !important; border-style: double; }
+  .blk.c5 { border-color: #94540f !important; border-style: dashed; }
+  .blk.c2.bt, .blk.c2.br, .blk.c2.bb, .blk.c2.bl { border-width: 1mm; }
+  .blk.c3.bt, .blk.c3.br, .blk.c3.bb, .blk.c3.bl { border-width: 1mm; }
+  .blk.c4.bt, .blk.c4.br, .blk.c4.bb, .blk.c4.bl { border-width: 1.2mm; }
+  .blk.c5.bt, .blk.c5.br, .blk.c5.bb, .blk.c5.bl { border-width: 1mm; }
+
   .block-label {
     background: #fff !important; font-size: 8.6pt; padding: .2mm 1mm;
   }
   .block-count { font-size: 9.2pt; }
-  .block.c0 { border-color: #8a6d00 !important; border-style: solid; }
-  .block.c1 { border-color: #23527c !important; border-style: dashed; }
-  .block.c2 { border-color: #96324a !important; border-style: solid; border-width: 1mm; }
-  .block.c3 { border-color: #2c6b2c !important; border-style: dotted; border-width: 1mm; }
-  .block.c4 { border-color: #5b3e93 !important; border-style: double; border-width: 1.2mm; }
-  .block.c5 { border-color: #94540f !important; border-style: dashed; border-width: 1mm; }
-  .block-free { border: .7mm dashed #555 !important; }
-  .block-free .block-label { font-size: 10pt; }
+  .blk-free { border: .7mm dashed #555 !important; margin: -.7mm; }
+  .blk-free .block-label { font-size: 10pt; }
+  .seat.is-picked-seat { box-shadow: none !important; }
 
   .legend { font-size: 7.5pt; margin-top: 2mm; }
   .legend span { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

@@ -219,28 +219,30 @@
     return 0; // 一周した
   }
 
-  function assignDay(layout, groups, opt) {
-    opt = opt || {};
-    var startIndex = Math.max(0, Number(opt.startIndex) || 0);
-    var sharing = opt.sharing !== false; // true = 席が窮屈なので相席もありうる
-    var warnings = [];
+  /**
+   * 座席を配置するための道具ひとそろい。
+   * 1日ぶんの状態（day）に対して働きます。自動割り当てにも、あとからの手動移動にも同じものを使います。
+   */
+  function createPlacer(layout, day) {
     var lastRow = layout.lastRow;
-
     var byPos = {};
     layout.seats.forEach(function (s) { byPos[s.row + ',' + s.col] = s; });
-    function at(r, c) { return byPos[r + ',' + c] || null; }
 
-    var placements = {};   // seatId -> { groupId, gender }
-    var reserved = {};     // seatId -> groupId（四角を保つための、そのグループ用の空席）
-    var seatsOfGroup = {};
+    day.placements = day.placements || {};
+    day.reserved = day.reserved || {};   // 四角の中の、そのグループ用の空席
+    day.blocked = day.blocked || {};     // 四角の外だが、相席を避けるため空けておく席
+
+    function at(r, c) { return byPos[r + ',' + c] || null; }
+    function sharing() { return day.sharing !== false; }
 
     function taken(seat) {
-      return !seat || seat.isCrew || !!placements[seat.id] || !!reserved[seat.id];
+      return !seat || seat.isCrew ||
+        !!day.placements[seat.id] || !!day.reserved[seat.id] || !!day.blocked[seat.id];
     }
     function ownerOf(seat) {
-      var p = placements[seat.id];
+      var p = day.placements[seat.id];
       if (p) return p.groupId;
-      return reserved[seat.id] || null;
+      return day.reserved[seat.id] || null;
     }
     // 通路をはさまずに隣り合う席（＝相席になりうる相手）
     function neighborsOf(seat) {
@@ -278,7 +280,6 @@
       var inRect = {};
       seats.forEach(function (s) { inRect[s.id] = true; });
 
-      // 通路をはさまずに別グループと隣り合う席と、そこで求められる性別
       var constraints = [];
       var hasForeign = false;
       seats.forEach(function (s) {
@@ -288,16 +289,16 @@
           var o = ownerOf(n);
           if (!o || o === groupId) return;
           hasForeign = true;
-          var p = placements[n.id];
-          if (p) need.push(p.gender);
+          var pp = day.placements[n.id];
+          if (pp) need.push(pp.gender);
         });
         if (need.length) constraints.push({ seat: s, need: need });
       });
 
       // 相席を作らない設定のときは、別グループと隣り合う四角は選ばない
-      if (!sharing && hasForeign) return null;
+      if (!sharing() && hasForeign) return null;
 
-      var pool = members.slice(0, count).map(function (m, i) { return { gender: m.gender, idx: i }; });
+      var pool = members.slice(0, count).map(function (m) { return { gender: m.gender }; });
       var plan = {};
       var used = {};
 
@@ -315,98 +316,231 @@
         plan[c.seat.id] = pool[found];
       }
 
-      // 残りの人を、前の席から順に埋める
       var rest = [];
       for (var k = 0; k < pool.length; k++) if (!used[k]) rest.push(pool[k]);
       var ri = 0;
-      var empties = [];
       seats.forEach(function (s) {
         if (plan[s.id]) return;
         if (ri < rest.length) plan[s.id] = rest[ri++];
-        else empties.push(s);
       });
       if (ri < rest.length) return null;
 
-      return { plan: plan, empties: empties };
+      return { plan: plan };
     }
 
     /**
-     * いちばん前で、いちばん形のよい四角を探す。
-     * @param {number} count   座らせたい人数
+     * いちばん前（または指定の列から近い順）で、いちばん形のよいかたまりを探す。
+     * 形は「四角」を基本に、角を欠けさせたL字も候補にします。
+     * 好みの順は 四角（ぴったり） ＞ L字（空席なし） ＞ 取り置き空席つきの四角。
+     * @param {number} count    座らせたい人数
      * @param {boolean} allowPad 四角にするために空席を作ってよいか
-     * @param {boolean} frontOnly 前から3列目までに限るか
+     * @param {object} opt      { frontOnly, fromRow, origin:{row,col}, groupId, members }
      */
-    function findRect(count, allowPad, frontOnly, group, members) {
-      for (var r0 = 1; r0 <= lastRow; r0++) {
-        if (frontOnly && r0 > FRONT_ROWS) return null;
+    function findRect(count, allowPad, opt) {
+      opt = opt || {};
+      // 1名は必ず1席ぶんの枠にする（2人組に見えてしまうため、余分な席を枠に含めない）
+      if (count <= 1) allowPad = false;
+
+      var rows = rowOrder(opt);
+      for (var ri = 0; ri < rows.length; ri++) {
+        var r0 = rows[ri];
+        if (opt.frontOnly && r0 > FRONT_ROWS) continue;
+        if (opt.origin && r0 !== opt.origin.row) continue;
+
         var maxH = r0 === lastRow ? 1 : lastRow - r0; // 最後部列と通常列はまたがない
         var maxW = r0 === lastRow ? 5 : 4;
         var best = null;
 
         for (var h = 1; h <= maxH; h++) {
-          if (frontOnly && r0 + h - 1 > FRONT_ROWS) break;
+          if (opt.frontOnly && r0 + h - 1 > FRONT_ROWS) break;
           for (var w = 1; w <= maxW; w++) {
             var area = w * h;
             if (area < count) continue;
-            var waste = area - count;
-            if (!allowPad && waste !== 0) continue;
-            if (waste > MAX_WASTE) continue;
+            if (area - count > MAX_WASTE) continue;
 
             for (var c0 = 1; c0 + w - 1 <= maxW; c0++) {
-              var seats = rectSeats(r0, c0, w, h);
-              if (!seats) continue;
-              var blocked = false;
-              for (var i = 0; i < seats.length; i++) {
-                if (taken(seats[i])) { blocked = true; break; }
+              if (opt.origin && c0 !== opt.origin.col) continue;
+              var full = rectSeats(r0, c0, w, h);
+              if (!full) continue;
+              var busy = false;
+              for (var i = 0; i < full.length; i++) {
+                if (taken(full[i])) { busy = true; break; }
               }
-              if (blocked) continue;
+              if (busy) continue;
 
-              var planned = planMembers(seats, members, count, group.id);
-              if (!planned) continue;
+              // 候補の形（そのままの四角／角を欠けさせたL字）
+              var shapes = shapeCandidates(full, w, h, count, allowPad);
+              for (var si = 0; si < shapes.length; si++) {
+                var sh = shapes[si];
+                var planned = planMembers(sh.seats, opt.members, count, opt.groupId);
+                if (!planned) continue;
 
-              var score = WIDTH_PENALTY[w] + h * 0.4 + waste * 0.6;
-              if (!best || score < best.score - 1e-9 ||
-                  (Math.abs(score - best.score) < 1e-9 && c0 < best.c0)) {
-                best = {
-                  r0: r0, c0: c0, w: w, h: h,
-                  seats: seats, score: score,
-                  plan: planned.plan, empties: planned.empties
-                };
+                var score = WIDTH_PENALTY[w] + h * 0.4 + sh.waste * 0.6 + sh.cut * 0.15;
+                if (!best || score < best.score - 1e-9 ||
+                    (Math.abs(score - best.score) < 1e-9 && c0 < best.c0)) {
+                  best = {
+                    r0: r0, c0: c0, w: w, h: h, cut: sh.cut,
+                    seats: sh.seats, score: score, plan: planned.plan
+                  };
+                }
               }
             }
           }
         }
-        if (best) return best; // いちばん前の列で見つかったものを使う
+        if (best) return best; // 見つかった列のなかでいちばん形のよいもの
       }
       return null;
     }
 
-    // 前席オプションのグループを先に、申し込み順のまま。
-    // 残りは日によって並べ始める位置をずらす（配置そのものは常に前から詰める）。
-    var frontGroups = groups.filter(function (g) { return g.frontOption; });
-    var restGroups = groups.filter(function (g) { return !g.frontOption; });
-    if (restGroups.length > 0) {
-      var k = startIndex % restGroups.length;
-      restGroups = restGroups.slice(k).concat(restGroups.slice(0, k));
+    /**
+     * 四角の枠から、実際に使う席のかたまりの候補を作る。
+     * ・そのままの四角（余るぶんは取り置きの空席になる）
+     * ・角を1〜2席ぶん欠けさせたL字（空席が出ない）
+     * 欠けさせたあとも、前後左右でひとつながりであることを確かめます。
+     */
+    function shapeCandidates(full, w, h, count, allowPad) {
+      var out = [];
+      var area = full.length;
+      var waste = area - count;
+
+      if (waste === 0) {
+        out.push({ seats: full, cut: 0, waste: 0 });
+        return out;
+      }
+      if (allowPad) out.push({ seats: full, cut: 0, waste: waste });
+      if (waste > 2) return out;
+
+      // 角から waste 席ぶん欠けさせる。
+      // 前の列・窓側を残したいので、後ろ・通路側の角から先に試します。
+      var corners = [[h - 1, w - 1], [h - 1, 0], [0, w - 1], [0, 0]];
+      var seen = {};
+      corners.forEach(function (cn) {
+        var patterns = [[cn]];
+        if (waste === 2) {
+          patterns = [];
+          // 角のとなり（同じ列方向／同じ席方向）をもう1席
+          if (w >= 2) patterns.push([cn, [cn[0], cn[1] === 0 ? 1 : w - 2]]);
+          if (h >= 2) patterns.push([cn, [cn[0] === 0 ? 1 : h - 2, cn[1]]]);
+        }
+        patterns.forEach(function (cells) {
+          var drop = {};
+          cells.forEach(function (c) { drop[c[0] + ',' + c[1]] = true; });
+          if (Object.keys(drop).length !== waste) return;
+
+          var kept = [];
+          for (var i = 0; i < h; i++) {
+            for (var j = 0; j < w; j++) {
+              if (!drop[i + ',' + j]) kept.push({ i: i, j: j, seat: full[i * w + j] });
+            }
+          }
+          if (kept.length !== count) return;
+          if (!isConnectedCells(kept)) return;
+
+          var key = kept.map(function (k) { return k.seat.id; }).join('|');
+          if (seen[key]) return;
+          seen[key] = true;
+          out.push({
+            seats: kept.map(function (k) { return k.seat; }),
+            cut: waste, waste: 0
+          });
+        });
+      });
+      return out;
     }
-    var ordered = frontGroups.concat(restGroups);
 
-    ordered.forEach(function (g) {
-      var members = g.members.slice();
+    // 前後左右でひとつながりか（斜めだけのつながりは認めない）
+    function isConnectedCells(cells) {
+      if (cells.length <= 1) return true;
+      var set = {};
+      cells.forEach(function (c) { set[c.i + ',' + c.j] = c; });
+      var queue = [cells[0]];
+      var seen = {};
+      seen[cells[0].i + ',' + cells[0].j] = true;
+      var n = 1;
+      while (queue.length) {
+        var cur = queue.pop();
+        [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (d) {
+          var k = (cur.i + d[0]) + ',' + (cur.j + d[1]);
+          if (set[k] && !seen[k]) { seen[k] = true; n++; queue.push(set[k]); }
+        });
+      }
+      return n === cells.length;
+    }
+
+    // 探す列の順番。ふつうは前から。移動のときは指定の列から後ろへ、なければ前へ戻る。
+    function rowOrder(opt) {
+      var all = [];
+      for (var r = 1; r <= lastRow; r++) all.push(r);
+      if (!opt.fromRow || opt.fromRow <= 1) return all;
+      var k = Math.min(opt.fromRow, lastRow) - 1;
+      return all.slice(k).concat(all.slice(0, k));
+    }
+
+    /** 決まった四角に、実際に座らせる */
+    function applyRect(pick, group) {
+      var inRect = {};
+      pick.seats.forEach(function (s) { inRect[s.id] = true; });
+
+      pick.seats.forEach(function (s) {
+        var m = pick.plan[s.id];
+        if (m) {
+          day.placements[s.id] = { groupId: group.id, gender: m.gender };
+        } else {
+          day.reserved[s.id] = group.id; // 四角を保つための、このグループ用の空席
+        }
+      });
+
+      // 相席を作らない設定のときは、四角からはみ出す2人掛けの相方を空けておく。
+      // この席は枠の外に置き、ふつうの空席として見せる（1名を2名に見せないため）。
+      if (!sharing()) {
+        pick.seats.forEach(function (s) {
+          neighborsOf(s).forEach(function (n) {
+            if (inRect[n.id] || taken(n)) return;
+            day.blocked[n.id] = group.id;
+          });
+        });
+      }
+    }
+
+    /** グループを座席表から取り除く */
+    function removeGroup(groupId) {
+      [day.placements, day.reserved, day.blocked].forEach(function (map) {
+        Object.keys(map).forEach(function (id) {
+          var owner = map === day.placements ? map[id].groupId : map[id];
+          if (owner === groupId) delete map[id];
+        });
+      });
+    }
+
+    /**
+     * グループ1組ぶんを置く。1つの四角に収まらないときは分割する。
+     * @returns {array} 出た注意の一覧
+     */
+    function placeGroup(g, opt) {
+      opt = opt || {};
+      var warnings = [];
+      var pad = sharing() ? false : true;
       var placedCount = 0;
-      seatsOfGroup[g.id] = [];
       var warnedFront = false;
+      var guard = 0;
 
-      while (placedCount < g.size) {
+      while (placedCount < g.size && guard++ < 60) {
         var left = g.size - placedCount;
-        var rest = members.slice(placedCount);
+        var rest = g.members.slice(placedCount);
+        var base = { groupId: g.id, members: rest, fromRow: opt.fromRow };
         var pick = null;
 
-        // 1. 希望どおりの場所に、四角を1つで
-        if (g.frontOption) {
-          pick = findRect(left, !sharing, true, g, rest) || findRect(left, false, true, g, rest);
+        if (opt.origin && placedCount === 0) {
+          // 指定の席を起点にできるなら、そこに置く
+          pick = findRect(left, pad, merge(base, { origin: opt.origin })) ||
+                 findRect(left, false, merge(base, { origin: opt.origin }));
+        }
+
+        if (!pick && g.frontOption && !opt.ignoreFront) {
+          pick = findRect(left, pad, merge(base, { frontOnly: true })) ||
+                 findRect(left, false, merge(base, { frontOnly: true }));
           if (!pick) {
-            pick = findRect(left, !sharing, false, g, rest) || findRect(left, false, false, g, rest);
+            pick = findRect(left, pad, base) || findRect(left, false, base);
             if (pick && !warnedFront) {
               warnedFront = true;
               warnings.push({
@@ -416,15 +550,14 @@
               });
             }
           }
-        } else {
-          pick = findRect(left, !sharing, false, g, rest) || findRect(left, false, false, g, rest);
+        } else if (!pick) {
+          pick = findRect(left, pad, base) || findRect(left, false, base);
         }
 
-        // 2. 1つの四角にできないときは、いちばん大きい四角に分けて置く
+        // 1つの四角にできないときは、いちばん大きい四角に分けて置く
         if (!pick) {
           for (var size = left - 1; size >= 1 && !pick; size--) {
-            pick = findRect(size, false, g.frontOption, g, rest) ||
-                   (g.frontOption ? findRect(size, false, false, g, rest) : null);
+            pick = findRect(size, false, base);
           }
           if (pick) {
             warnings.push({
@@ -444,31 +577,87 @@
           break;
         }
 
-        pick.seats.forEach(function (s) {
-          var m = pick.plan[s.id];
-          if (m) {
-            placements[s.id] = { groupId: g.id, gender: m.gender };
-            seatsOfGroup[g.id].push(s.id);
-            placedCount++;
-          } else {
-            reserved[s.id] = g.id; // 四角を保つための、このグループ用の空席
-          }
-        });
+        applyRect(pick, g);
+        placedCount += Object.keys(pick.plan).length;
       }
+      return warnings;
+    }
+
+    function merge(a, b) {
+      var out = {};
+      Object.keys(a).forEach(function (k) { out[k] = a[k]; });
+      Object.keys(b).forEach(function (k) { out[k] = b[k]; });
+      return out;
+    }
+
+    return {
+      at: at,
+      taken: taken,
+      neighborsOf: neighborsOf,
+      findRect: findRect,
+      applyRect: applyRect,
+      removeGroup: removeGroup,
+      placeGroup: placeGroup
+    };
+  }
+
+  /** そのグループが占めている四角の左上（いちばん前・いちばん左）の席 */
+  function originOfGroup(day, groupId) {
+    var row = null, col = null;
+    function check(id, owner) {
+      if (owner !== groupId) return;
+      var m = /^r(\d+)-(\d+)$/.exec(id);
+      if (!m) return;
+      var r = Number(m[1]), c = Number(m[2]);
+      if (row === null || r < row || (r === row && c < col)) { row = r; col = c; }
+    }
+    Object.keys(day.placements).forEach(function (id) { check(id, day.placements[id].groupId); });
+    Object.keys(day.reserved || {}).forEach(function (id) { check(id, day.reserved[id]); });
+    return row === null ? null : { row: row, col: col };
+  }
+
+  function refreshDay(layout, day) {
+    day.seatsOfGroup = {};
+    Object.keys(day.placements).forEach(function (sid) {
+      var gid = day.placements[sid].groupId;
+      (day.seatsOfGroup[gid] = day.seatsOfGroup[gid] || []).push(sid);
     });
+    day.shared = sharedPairs(layout, day);
+    day.blocks = computeBlocks(layout, day);
+    day.freeArea = freeAreaBlock(layout, day);
+    return day;
+  }
+
+  function assignDay(layout, groups, opt) {
+    opt = opt || {};
+    var startIndex = Math.max(0, Number(opt.startIndex) || 0);
+    var frontStartIndex = Math.max(0, Number(opt.frontStartIndex) || 0);
+    var warnings = [];
 
     var day = {
       startIndex: startIndex,
-      shifted: startIndex > 0,
-      groupOrder: ordered.map(function (g) { return g.id; }),
-      sharing: sharing,
-      placements: placements,
-      reserved: reserved,
-      seatsOfGroup: seatsOfGroup,
+      frontStartIndex: frontStartIndex,
+      shifted: startIndex > 0 || frontStartIndex > 0,
+      sharing: opt.sharing !== false, // true = 席が窮屈なので相席もありうる
+      placements: {},
+      reserved: {},
+      blocked: {},
       warnings: warnings
     };
+    var placer = createPlacer(layout, day);
 
-    day.shared = sharedPairs(layout, day);
+    // 前席オプションのグループを先に。
+    // 前席組は「前3列のなか」で、それ以外は「バス全体」で、日ごとに並べ始める位置をずらす。
+    var frontGroups = rotate(groups.filter(function (g) { return g.frontOption; }), frontStartIndex);
+    var restGroups = rotate(groups.filter(function (g) { return !g.frontOption; }), startIndex);
+    var ordered = frontGroups.concat(restGroups);
+    day.groupOrder = ordered.map(function (g) { return g.id; });
+
+    ordered.forEach(function (g) {
+      placer.placeGroup(g).forEach(function (w) { warnings.push(w); });
+    });
+
+    refreshDay(layout, day);
     day.shared.forEach(function (sh) {
       if (sh.mixedGender) {
         warnings.push({
@@ -479,6 +668,91 @@
     });
 
     return day;
+  }
+
+  function rotate(list, k) {
+    if (list.length === 0) return list;
+    var n = k % list.length;
+    return list.slice(n).concat(list.slice(0, n));
+  }
+
+  /* ---------------------------------------------------------
+   * 手動調整：グループごと動かす
+   * ------------------------------------------------------- */
+
+  function snapshot(day) {
+    return JSON.stringify({ p: day.placements, r: day.reserved, b: day.blocked });
+  }
+  function restore(day, snap) {
+    var s = JSON.parse(snap);
+    day.placements = s.p; day.reserved = s.r; day.blocked = s.b;
+  }
+  function groupById(groups, id) {
+    for (var i = 0; i < groups.length; i++) if (groups[i].id === id) return groups[i];
+    return null;
+  }
+
+  /**
+   * グループを、指定した席を起点に動かす。
+   * その席にぴったり置けないときは、その列から近いところに置き直します。
+   */
+  function moveGroup(layout, groups, day, groupId, targetSeatId) {
+    var g = groupById(groups, groupId);
+    var m = /^r(\d+)-(\d+)$/.exec(targetSeatId || '');
+    if (!g || !m) return { ok: false, message: '動かせませんでした。' };
+
+    var origin = { row: Number(m[1]), col: Number(m[2]) };
+    var snap = snapshot(day);
+    var placer = createPlacer(layout, day);
+    placer.removeGroup(groupId);
+
+    var warnings = placer.placeGroup(g, { origin: origin, fromRow: origin.row, ignoreFront: true });
+    if (warnings.some(function (w) { return w.type === 'no-seat'; })) {
+      restore(day, snap);
+      refreshDay(layout, day);
+      return { ok: false, message: 'そこには置けませんでした。ほかの場所を試してください。' };
+    }
+    refreshDay(layout, day);
+    return {
+      ok: true,
+      message: warnings.length ? warnings[0].message : '',
+      warnings: warnings
+    };
+  }
+
+  /**
+   * 2つのグループの場所を入れ替える。
+   * 人数が違う場合は、相手のいた場所を起点に置き直します。
+   */
+  function swapGroups(layout, groups, day, groupIdA, groupIdB) {
+    var ga = groupById(groups, groupIdA);
+    var gb = groupById(groups, groupIdB);
+    if (!ga || !gb || groupIdA === groupIdB) return { ok: false, message: '入れ替えられませんでした。' };
+
+    var oa = originOfGroup(day, groupIdA);
+    var ob = originOfGroup(day, groupIdB);
+    if (!oa || !ob) return { ok: false, message: '入れ替えられませんでした。' };
+
+    var snap = snapshot(day);
+    var placer = createPlacer(layout, day);
+    placer.removeGroup(groupIdA);
+    placer.removeGroup(groupIdB);
+
+    var warnings = []
+      .concat(placer.placeGroup(ga, { origin: ob, fromRow: ob.row, ignoreFront: true }))
+      .concat(placer.placeGroup(gb, { origin: oa, fromRow: oa.row, ignoreFront: true }));
+
+    if (warnings.some(function (w) { return w.type === 'no-seat'; })) {
+      restore(day, snap);
+      refreshDay(layout, day);
+      return { ok: false, message: 'この2組は入れ替えられませんでした（席の形が合いません）。' };
+    }
+    refreshDay(layout, day);
+    return {
+      ok: true,
+      message: warnings.length ? warnings[0].message : '',
+      warnings: warnings
+    };
   }
 
   /* ---------------------------------------------------------
@@ -522,8 +796,9 @@
   }
 
   /* ---------------------------------------------------------
-   * ブロック（グループを囲む四角）の組み立て
+   * ブロック（グループを囲む枠）の組み立て
    * 席の入れ替えをしたあとでも、そのときの座席から作り直せます。
+   * 形は四角に限らず、L字などひとつながりの形をそのまま囲みます。
    * ------------------------------------------------------- */
 
   function computeBlocks(layout, day) {
@@ -547,49 +822,125 @@
 
     var blocks = [];
     Object.keys(byGroup).forEach(function (gid) {
-      var pool = byGroup[gid];
-      var guard = 0;
-      while (Object.keys(pool).length > 0 && guard++ < 100) {
-        var best = biggestRect(pool);
-        if (!best) break;
-        best.seats.forEach(function (s) { delete pool[s.id]; });
-        blocks.push({
-          groupId: gid,
-          row0: best.r0, row1: best.r0 + best.h - 1,
-          col0: best.c0, col1: best.c0 + best.w - 1,
-          trackStart: trackOf(layout, best.r0, best.c0),
-          trackEnd: trackOf(layout, best.r0, best.c0 + best.w - 1),
-          seatIds: best.seats.map(function (s) { return s.id; }),
-          people: best.seats.filter(function (s) { return !!day.placements[s.id]; }).length
-        });
-      }
+      components(byGroup[gid]).forEach(function (comp) {
+        blocks.push(describe(gid, comp));
+      });
     });
 
-    // 前の席のブロックほど先に。ラベルはブロックに1回だけ描きます。
     blocks.sort(function (a, b) { return a.row0 - b.row0 || a.col0 - b.col0; });
     return blocks;
 
-    function biggestRect(pool) {
+    // ひとつながりのかたまりに分ける（前後左右でつながっていること）
+    function components(pool) {
+      var rest = {};
+      Object.keys(pool).forEach(function (id) { rest[id] = true; });
+      var out = [];
+      while (true) {
+        var ids = Object.keys(rest);
+        if (ids.length === 0) break;
+        var queue = [ids[0]];
+        delete rest[ids[0]];
+        var comp = [];
+        while (queue.length) {
+          var id = queue.pop();
+          var seat = byIdSeat(id);
+          comp.push(seat);
+          neighbors(seat).forEach(function (n) {
+            if (n && rest[n.id]) { delete rest[n.id]; queue.push(n.id); }
+          });
+        }
+        out.push(comp);
+      }
+      return out;
+    }
+
+    function byIdSeat(id) {
+      var m = /^r(\d+)-(\d+)$/.exec(id);
+      return byPos[Number(m[1]) + ',' + Number(m[2])];
+    }
+
+    // 前後左右のとなり。通路をはさむ左右（2席目と3席目）もとなりとして扱います。
+    function neighbors(seat) {
+      return [
+        byPos[seat.row + ',' + (seat.col - 1)],
+        byPos[seat.row + ',' + (seat.col + 1)],
+        seat.row === lastRow ? null : byPos[(seat.row - 1) + ',' + seat.col],
+        seat.row + 1 === lastRow ? null : byPos[(seat.row + 1) + ',' + seat.col]
+      ];
+    }
+
+    // かたまりの外周をなぞるための情報を作る
+    function describe(gid, comp) {
+      var inBlock = {};
+      comp.forEach(function (s) { inBlock[s.row + ',' + s.col] = true; });
+      function has(r, c) { return !!inBlock[r + ',' + c]; }
+
+      var cells = comp.map(function (s) {
+        return {
+          seatId: s.id,
+          row: s.row,
+          col: s.col,
+          track: trackOf(layout, s.row, s.col),
+          top: !has(s.row - 1, s.col) || s.row === lastRow,
+          bottom: !has(s.row + 1, s.col) || s.row + 1 === lastRow,
+          left: !has(s.row, s.col - 1),
+          right: !has(s.row, s.col + 1)
+        };
+      });
+
+      // 通路をまたいでつながっている行は、通路のすじにも枠の線を渡す
+      var bridges = [];
+      if (comp[0].row !== lastRow) {
+        var rows = {};
+        comp.forEach(function (s) { rows[s.row] = true; });
+        Object.keys(rows).map(Number).forEach(function (r) {
+          if (has(r, 2) && has(r, 3)) bridges.push({ row: r, track: 3 });
+        });
+      }
+
+      var rowsAll = comp.map(function (s) { return s.row; });
+      var colsAll = comp.map(function (s) { return s.col; });
+      var r0 = Math.min.apply(null, rowsAll), r1 = Math.max.apply(null, rowsAll);
+      var c0 = Math.min.apply(null, colsAll), c1 = Math.max.apply(null, colsAll);
+
+      return {
+        groupId: gid,
+        row0: r0, row1: r1, col0: c0, col1: c1,
+        trackStart: trackOf(layout, r0, c0),
+        trackEnd: trackOf(layout, r0, c1),
+        isRect: comp.length === (r1 - r0 + 1) * (c1 - c0 + 1),
+        cells: cells,
+        bridges: bridges,
+        // ラベルは、かたまりの中でいちばん広い四角の真ん中に1回だけ描く
+        label: widestRect(inBlock, r0, r1, c0, c1),
+        seatIds: comp.map(function (s) { return s.id; }),
+        people: comp.filter(function (s) { return !!day.placements[s.id]; }).length
+      };
+    }
+
+    // かたまりの中に収まる、いちばん広い四角
+    function widestRect(inBlock, r0, r1, c0, c1) {
       var best = null;
-      for (var r0 = 1; r0 <= lastRow; r0++) {
-        var maxH = r0 === lastRow ? 1 : lastRow - r0;
-        var maxW = r0 === lastRow ? 5 : 4;
-        for (var h = 1; h <= maxH; h++) {
-          for (var w = 1; w <= maxW; w++) {
-            for (var c0 = 1; c0 + w - 1 <= maxW; c0++) {
-              var seats = [];
+      for (var ra = r0; ra <= r1; ra++) {
+        for (var rb = ra; rb <= r1; rb++) {
+          for (var ca = c0; ca <= c1; ca++) {
+            for (var cb = ca; cb <= c1; cb++) {
               var ok = true;
-              for (var r = r0; r < r0 + h && ok; r++) {
-                for (var c = c0; c < c0 + w; c++) {
-                  var s = byPos[r + ',' + c];
-                  if (!s || !pool[s.id]) { ok = false; break; }
-                  seats.push(s);
+              for (var r = ra; r <= rb && ok; r++) {
+                for (var c = ca; c <= cb; c++) {
+                  if (!inBlock[r + ',' + c]) { ok = false; break; }
                 }
               }
               if (!ok) continue;
-              var area = w * h;
-              if (!best || area > best.area || (area === best.area && r0 < best.r0)) {
-                best = { r0: r0, c0: c0, w: w, h: h, area: area, seats: seats };
+              var area = (rb - ra + 1) * (cb - ca + 1);
+              var wide = cb - ca + 1;
+              if (!best || area > best.area || (area === best.area && wide > best.wide)) {
+                best = {
+                  area: area, wide: wide,
+                  row0: ra, row1: rb, col0: ca, col1: cb,
+                  trackStart: trackOf(layout, ra, ca),
+                  trackEnd: trackOf(layout, ra, cb)
+                };
               }
             }
           }
@@ -688,17 +1039,18 @@
     var dayCount = Math.max(1, Number(input.days) || 1);
     var sharing = input.sharing != null ? !!input.sharing : !shouldAvoidSharing(layout, groups);
 
+    // 前席オプション組は「前3列のなか」で、それ以外は「バス全体」で、それぞれ日ごとに巡回させる
+    var frontRotating = groups.filter(function (g) { return g.frontOption; });
     var rotating = groups.filter(function (g) { return !g.frontOption; });
 
     var days = [];
     for (var d = 0; d < dayCount; d++) {
       var day = assignDay(layout, groups, {
         startIndex: startIndexForDay(rotating, d, dayCount),
+        frontStartIndex: startIndexForDay(frontRotating, d, dayCount),
         sharing: sharing
       });
       day.dayIndex = d;
-      day.blocks = computeBlocks(layout, day);
-      day.freeArea = freeAreaBlock(layout, day);
       days.push(day);
     }
 
@@ -726,28 +1078,24 @@
   function swapSeats(layout, day, seatIdA, seatIdB) {
     var p = day.placements;
     var res = day.reserved || (day.reserved = {});
+    var blk = day.blocked || (day.blocked = {});
     var a = p[seatIdA], b = p[seatIdB];
     var ra = res[seatIdA], rb = res[seatIdB];
+    var ba = blk[seatIdA], bb = blk[seatIdB];
 
     if (a) p[seatIdB] = a; else delete p[seatIdB];
     if (b) p[seatIdA] = b; else delete p[seatIdA];
-    // 四角を保つための空席も一緒に入れ替える
+    // 取り置きの空席も一緒に入れ替える
     if (ra) res[seatIdB] = ra; else delete res[seatIdB];
     if (rb) res[seatIdA] = rb; else delete res[seatIdA];
-    // 人が座った席は「確保しただけの空席」ではなくなる
-    if (p[seatIdA]) delete res[seatIdA];
-    if (p[seatIdB]) delete res[seatIdB];
-
-    day.seatsOfGroup = {};
-    Object.keys(p).forEach(function (sid) {
-      var gid = p[sid].groupId;
-      (day.seatsOfGroup[gid] = day.seatsOfGroup[gid] || []).push(sid);
+    if (ba) blk[seatIdB] = ba; else delete blk[seatIdB];
+    if (bb) blk[seatIdA] = bb; else delete blk[seatIdA];
+    // 人が座った席は「取り置きの空席」ではなくなる
+    [seatIdA, seatIdB].forEach(function (id) {
+      if (p[id]) { delete res[id]; delete blk[id]; }
     });
 
-    day.shared = sharedPairs(layout, day);
-    day.blocks = computeBlocks(layout, day);
-    day.freeArea = freeAreaBlock(layout, day);
-    return day;
+    return refreshDay(layout, day);
   }
 
   return {
@@ -766,7 +1114,10 @@
     computeBlocks: computeBlocks,
     freeAreaBlock: freeAreaBlock,
     sharedPairs: sharedPairs,
+    originOfGroup: originOfGroup,
     swapSeats: swapSeats,
+    moveGroup: moveGroup,
+    swapGroups: swapGroups,
     maru: maru
   };
 });
