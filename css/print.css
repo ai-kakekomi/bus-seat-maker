@@ -22,7 +22,6 @@
   .btn-row,
   .swap-hint,
   .flash,
-  #manual-warnings,
   .manual-check,
   #input-pane { display: none !important; }
 
@@ -32,6 +31,7 @@
   #sheets { display: block; }
 
   .sheet {
+    overflow: visible;
     border: none; border-radius: 0; padding: 0; margin: 0;
     page-break-after: always; break-after: page;
   }
@@ -43,10 +43,15 @@
 
   .front-mark { background: #ddd !important; margin: 4mm 0 2mm; }
 
-  .bus { gap: 1.2mm; }
+  .bus {
+    gap: 1.2mm;
+    grid-template-columns: 30mm 30mm 14mm 30mm 30mm;
+    grid-auto-rows: 13mm;
+    justify-content: center;
+  }
 
   .seat {
-    min-height: 12.5mm; padding: 3.2mm .5mm .5mm;
+    min-height: 0; height: 100%; padding: 3.2mm .5mm .5mm;
     font-size: 7.6pt; line-height: 1.15;
     border: .25mm solid #666;
     -webkit-print-color-adjust: exact; print-color-adjust: exact;

@@ -583,6 +583,128 @@ test('注意のメッセージには個人名を出さない（記号だけ）',
   });
 });
 
+console.log('\n--- 3の6. 自動で割り当て直したときのリセット ---');
+
+// 1日ぶんの座席状態をそのまま文字列にする（比較用）
+function dayState(day) {
+  return JSON.stringify({
+    p: sortedEntries(day.placements, function (v) { return v.groupId + ':' + v.gender; }),
+    r: sortedEntries(day.reserved, function (v) { return v; }),
+    b: sortedEntries(day.blocked, function (v) { return v; })
+  });
+}
+function sortedEntries(map, fmt) {
+  return Object.keys(map || {}).sort().map(function (k) { return k + '=' + fmt(map[k]); });
+}
+function allState(r) { return r.days.map(dayState).join('||'); }
+
+test('手で直したあと割り当て直すと、初回とまったく同じになる', function () {
+  var input = {
+    layoutType: '11x45',
+    days: 3,
+    groups: [
+      group('f1', 2, { frontOption: true }), group('f2', 2, { frontOption: true }),
+      group('g1', 4), group('g2', 3), group('g3', 1), group('g4', 5), group('g5', 2)
+    ]
+  };
+  var first = S.assign(input);
+  var before = allState(first);
+
+  // 3日ぶん、いろいろ手で直す
+  S.moveGroup(first.layout, first.groups, first.days[0], 'g1', 'r9-1');
+  S.swapGroups(first.layout, first.groups, first.days[1], 'g2', 'g4');
+  S.swapSeats(first.layout, first.days[2], first.days[2].seatsOfGroup['g1'][0], 'r10-4');
+  ok(allState(first) !== before, '手で直しても変化していない（テスト条件が不適切）');
+
+  // 同じ入力で割り当て直す
+  var again = S.assign(input);
+  eq(allState(again), before, '割り当て直した結果が初回と違う');
+});
+
+test('割り当て直しは日ごとの残りかすを持ち越さない', function () {
+  var input = {
+    layoutType: '12x49', days: 2,
+    groups: [group('g1', 3), group('g2', 4), group('g3', 2)]
+  };
+  var first = S.assign(input);
+  var before = first.days.map(dayState);
+
+  // 1日目だけ大きく崩す
+  S.moveGroup(first.layout, first.groups, first.days[0], 'g2', 'r11-1');
+  S.moveGroup(first.layout, first.groups, first.days[0], 'g1', 'r10-3');
+
+  var again = S.assign(input);
+  again.days.forEach(function (day, i) {
+    eq(dayState(day), before[i], (i + 1) + '日目が初回と違う');
+  });
+  // 見直しの注意も出ない状態に戻っていること
+  again.days.forEach(function (day, i) {
+    eq(S.inspectDay(again.layout, again.groups, day).length, 0, (i + 1) + '日目の注意');
+  });
+});
+
+test('手で直しても、元の割り当て結果のグループ情報は壊れない', function () {
+  var input = { layoutType: '11x45', days: 1, groups: [group('g1', 4), group('g2', 2)] };
+  var r = S.assign(input);
+  var membersBefore = JSON.stringify(r.groups.map(function (g) { return g.members; }));
+  S.moveGroup(r.layout, r.groups, r.days[0], 'g1', 'r8-1');
+  S.swapGroups(r.layout, r.groups, r.days[0], 'g1', 'g2');
+  eq(JSON.stringify(r.groups.map(function (g) { return g.members; })), membersBefore, 'メンバー情報が書き換わった');
+});
+
+console.log('\n--- 3の7. 前席オプションの警告が出すぎないか ---');
+
+test('前3列に収まっている前席組には front-out を出さない', function () {
+  var groups = [
+    group('f1', 2, { frontOption: true }), group('f2', 2, { frontOption: true }),
+    group('g1', 4), group('g2', 4), group('g3', 3)
+  ];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 3 });
+
+  r.days.forEach(function (day, di) {
+    // 前提：前席組はどの日も前3列に収まっている
+    ['f1', 'f2'].forEach(function (id) {
+      day.seatsOfGroup[id].forEach(function (sid) {
+        ok(seatRow(sid) <= 3, (di + 1) + '日目に' + id + 'が前3列を出た');
+      });
+    });
+    // 前席組に触れない手動編集をしても、front-out は出ない
+    S.moveGroup(r.layout, r.groups, day, 'g3', 'r9-1');
+    var issues = S.inspectDay(r.layout, r.groups, day).filter(function (i) { return i.type === 'front-out'; });
+    eq(issues.length, 0, (di + 1) + '日目に誤警告: ' + issues.map(function (i) { return i.message; }).join(' / '));
+  });
+});
+
+test('3列目ちょうどは警告にならず、4列目から警告になる（境界）', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('f1', 2, { frontOption: true }), group('g1', 4)], days: 1 });
+  var day = r.days[0];
+
+  // 3列目ちょうどに動かす → 警告なし
+  eq(S.moveGroup(r.layout, r.groups, day, 'f1', 'r3-3').ok, true, '3列目への移動');
+  eq(Math.max.apply(null, day.seatsOfGroup['f1'].map(seatRow)), 3, '3列目にいること');
+  eq(S.inspectDay(r.layout, r.groups, day).filter(function (i) { return i.type === 'front-out'; }).length,
+     0, '3列目で警告が出た');
+
+  // 4列目に動かす → 警告あり
+  eq(S.moveGroup(r.layout, r.groups, day, 'f1', 'r4-3').ok, true, '4列目への移動');
+  eq(Math.min.apply(null, day.seatsOfGroup['f1'].map(seatRow)), 4, '4列目にいること');
+  eq(S.inspectDay(r.layout, r.groups, day).filter(function (i) { return i.type === 'front-out'; }).length,
+     1, '4列目で警告が出ない');
+});
+
+test('警告が出るのは、その日に実際に逸脱している日だけ', function () {
+  var groups = [group('f1', 2, { frontOption: true }), group('g1', 4), group('g2', 4)];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 3 });
+
+  // 2日目だけ前席組を後ろへ
+  S.moveGroup(r.layout, r.groups, r.days[1], 'f1', 'r8-1');
+
+  eq(S.inspectDay(r.layout, r.groups, r.days[0]).length, 0, '1日目');
+  eq(S.inspectDay(r.layout, r.groups, r.days[1])
+      .filter(function (i) { return i.type === 'front-out'; }).length, 1, '2日目');
+  eq(S.inspectDay(r.layout, r.groups, r.days[2]).length, 0, '3日目');
+});
+
 console.log('\n--- 4. 複数日と巡回シフト ---');
 
 function starts(groups, dayCount) {

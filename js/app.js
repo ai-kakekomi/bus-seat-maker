@@ -212,16 +212,21 @@
 
   /* ---------------- 割り当てと描画 ---------------- */
 
+  /**
+   * 座席をゼロから割り当て直す。
+   * 手で直した内容・選択中の状態・見直しの注意は、すべて捨てます。
+   * state.groups をコピーしてから渡すので、前回の結果が混ざることはありません。
+   */
   function recompute() {
     selection = null;
+    selectedSeat = null;
     manualEdited = {};
     result = S.assign({
       layoutType: state.layoutType,
-      groups: state.groups,
+      groups: JSON.parse(JSON.stringify(state.groups)),
       days: state.days,
       useRealName: state.useRealName
     });
-    selectedSeat = null;
   }
 
   function changed() {
@@ -229,7 +234,6 @@
     renderGroups();
     renderMessages();
     renderSheets();
-    renderManualWarnings();
     flash('');
     save();
   }
@@ -317,7 +321,30 @@
       sheet.appendChild(note);
 
       box.appendChild(sheet);
+
+      // 手で直した日だけ、その座席表のすぐ下に見直しの注意を出す（印刷には出ません）
+      var check = manualCheckBox(day, di);
+      if (check) box.appendChild(check);
     });
+  }
+
+  /**
+   * 手で直したあとの見直し。
+   * 自動割り当ては決まりを守るので、手で直した日だけ点検します。
+   * どの日の話か分かるよう、その日の座席表の真下に置きます。
+   */
+  function manualCheckBox(day, dayIndex) {
+    if (!manualEdited[dayIndex]) return null;
+    var issues = S.inspectDay(result.layout, result.groups, day);
+    if (issues.length === 0) return null;
+
+    var card = el('div', 'manual-check no-print');
+    card.appendChild(el('p', 'manual-check-head',
+      'この座席表を手で直したあとの確認（' + issues.length + '件）　※印刷には出ません'));
+    var ul = el('ul', 'msg-list');
+    issues.forEach(function (i) { ul.appendChild(el('li', '', i.message)); });
+    card.appendChild(ul);
+    return card;
   }
 
   /**
@@ -480,7 +507,6 @@
       flash(失敗の理由(res));
     }
     renderSheets();
-    renderManualWarnings();
   }
 
   // 1席ずつ入れ替えるモード
@@ -500,7 +526,6 @@
       }
     }
     renderSheets();
-    renderManualWarnings();
   }
 
   /** グループの呼び名（人数つき） */
@@ -539,35 +564,6 @@
     var ws = res.warnings || [];
     if (ws.length) return ws[0].message;
     return res.reason === 'swapped' ? '2組の場所を入れ替えました。' : '移動しました。';
-  }
-
-  /**
-   * 手で直したあとの見直し。
-   * 自動割り当ては決まりを守るので、手で直した日だけ点検して注意を出します。
-   * 印刷には含めません。
-   */
-  function renderManualWarnings() {
-    var box = $('manual-warnings');
-    if (!box) return;
-    box.innerHTML = '';
-    if (!result) return;
-
-    var rows = [];
-    result.days.forEach(function (day, di) {
-      if (!manualEdited[di]) return;
-      S.inspectDay(result.layout, result.groups, day).forEach(function (issue) {
-        rows.push((state.days > 1 ? (di + 1) + '日目：' : '') + issue.message);
-      });
-    });
-    if (rows.length === 0) return;
-
-    var card = el('div', 'manual-check');
-    card.appendChild(el('p', 'manual-check-head',
-      '手で直したあとの確認（' + rows.length + '件）　※印刷には出ません'));
-    var ul = el('ul', 'msg-list');
-    rows.forEach(function (t) { ul.appendChild(el('li', '', t)); });
-    card.appendChild(ul);
-    box.appendChild(card);
   }
 
   function flash(text) {
@@ -687,7 +683,11 @@
     $('clear-groups').addEventListener('click', function () {
       if (window.confirm('入力したグループを全部消します。よろしいですか？')) { state.groups = []; changed(); }
     });
-    $('assign').addEventListener('click', function () { changed(); });
+    $('assign').addEventListener('click', function () {
+      // 手で直した内容を全部捨てて、申し込み順から割り当て直す
+      changed();
+      flash('申し込み順に割り当て直しました。手で直した内容は消えています。');
+    });
     $('print').addEventListener('click', function () { window.print(); });
     $('save-file').addEventListener('click', downloadFile);
     $('load-file-btn').addEventListener('click', function () { $('load-file').click(); });

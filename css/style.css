@@ -17,6 +17,11 @@
   --error-bg: #fdecea;
   --radius: 10px;
 
+  /* 座席マスの大きさ（中身によらず固定） */
+  --seat-w: 4.6rem;
+  --seat-h: 3.4rem;
+  --aisle-w: 2.2rem;
+
   /* グループのマーカー色（手書きの蛍光ペン運用の再現。6色） */
   --c0-bg: #fff2b8; --c0-line: #c79a00; --c0-stripe: #ffdf6e;
   --c1-bg: #d9ecff; --c1-line: #2f6fb0; --c1-stripe: #a9d2f7;
@@ -162,6 +167,7 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 .sheet {
   background: #fff; border: 1px solid var(--line); border-radius: var(--radius);
   padding: 1rem 1.1rem; margin-bottom: 1.2rem;
+  overflow-x: auto; /* 画面が狭いときは座席表だけ横スクロール（マスは縮めない） */
 }
 .sheet-head {
   display: flex; justify-content: space-between; align-items: baseline;
@@ -179,12 +185,15 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
   text-align: center; font-size: .85rem; color: var(--fg-muted); margin-top: .4rem;
 }
 
-/* 5本の縦すじ（左2席・通路・右2席）のマス目。最後部列の中央席は通路のすじを使います */
+/* 5本の縦すじ（左2席・通路・右2席）のマス目。最後部列の中央席は通路のすじを使います。
+   マスの大きさは中身に関係なく固定です（名前が長くても座席表が伸び縮みしません） */
 .bus {
   display: grid;
-  grid-template-columns: 1fr 1fr .62fr 1fr 1fr;
+  grid-template-columns: var(--seat-w) var(--seat-w) var(--aisle-w) var(--seat-w) var(--seat-w);
+  grid-auto-rows: var(--seat-h);
   gap: .34rem;
-  align-items: stretch;
+  justify-content: center;
+  align-content: start;
 }
 .row-no {
   position: absolute; left: .18rem; top: .05rem; font-size: .62rem; color: #8a969e;
@@ -192,7 +201,8 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 
 .seat {
   position: relative; border: 1px solid var(--line); border-radius: 5px;
-  background: #fff; min-height: 3.1rem; padding: .8rem .2rem .2rem;
+  background: #fff; padding: .8rem .2rem .2rem;
+  width: 100%; height: 100%; min-width: 0; min-height: 0;
   text-align: center; font-size: .78rem; line-height: 1.2;
   cursor: pointer; overflow: hidden;
 }
@@ -254,6 +264,7 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
   position: relative; pointer-events: none; z-index: 4;
   display: flex; align-items: center; justify-content: center;
   padding-bottom: 1.15rem;
+  min-width: 0; overflow: hidden; /* 長い名前でもマスを押し広げない */
 }
 .block-label {
   background: rgba(255, 255, 255, .72);
@@ -276,9 +287,9 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 
 .mode-row { margin: 0 0 .3rem; }
 
-/* 手で直したあとの見直し（印刷には出しません） */
+/* 手で直したあとの見直し（その日の座席表のすぐ下に出します。印刷には出しません） */
 .manual-check {
-  margin-top: .7rem; padding: .7rem .9rem;
+  margin: -.6rem 0 1.2rem; padding: .7rem .9rem;
   border: 1px solid #e5cf9a; border-left: 6px solid var(--warn);
   border-radius: var(--radius); background: var(--warn-bg);
 }
