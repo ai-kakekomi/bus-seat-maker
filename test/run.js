@@ -416,6 +416,137 @@ test('グループを動かしても、ほかのグループはそのまま', fu
   eq(day.seatsOfGroup['g2'].slice().sort().join(','), before2, 'g2が動いてしまった');
 });
 
+console.log('\n--- 3の3の2. ブロックの形の決まり（横並び優先・奥行き2列まで） ---');
+
+// ブロックの寸法（何席幅 × 何列）
+function blockSize(b) {
+  return { w: b.col1 - b.col0 + 1, h: b.row1 - b.row0 + 1 };
+}
+// 形の決まりに反しているブロックを集める
+function badBlocks(day) {
+  return (day.blocks || []).filter(function (b) {
+    var s = blockSize(b);
+    return s.h > 2 || (s.h >= 2 && s.w < 2);
+  });
+}
+
+test('2名グループは必ず横並び（縦に並べない）', function () {
+  var groups = [];
+  for (var i = 1; i <= 12; i++) groups.push(group('g' + i, 2));
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 2 });
+  r.days.forEach(function (day, di) {
+    groups.forEach(function (g) {
+      var bs = blocksOf(day, g.id);
+      eq(bs.length, 1, (di + 1) + '日目の' + g.id + ' のブロック数');
+      var s = blockSize(bs[0]);
+      eq(s.h, 1, (di + 1) + '日目の' + g.id + ' が縦並びになっている');
+      eq(s.w, 2, (di + 1) + '日目の' + g.id + ' の横幅');
+      eq(seatRow(bs[0].seatIds[0]), seatRow(bs[0].seatIds[1]), '同じ列に並んでいない');
+    });
+  });
+});
+
+test('どのブロックも奥行きは2列まで', function () {
+  var sizes = [1, 2, 3, 4, 5, 6, 7, 8];
+  sizes.forEach(function (n) {
+    var r = S.assign({ layoutType: '11x45', groups: [group('g1', n)], days: 1 });
+    var bs = blocksOf(r.days[0], 'g1');
+    bs.forEach(function (b) {
+      var s = blockSize(b);
+      ok(s.h <= 2, n + '名の形が ' + s.w + '席幅×' + s.h + '列（奥行きが深すぎる）');
+      ok(!(s.h >= 2 && s.w < 2), n + '名が縦並びになっている');
+    });
+  });
+});
+
+test('3名・4名は縦1列に並べない', function () {
+  [3, 4].forEach(function (n) {
+    var r = S.assign({ layoutType: '11x45', groups: [group('g1', n)], days: 1 });
+    var b = blocksOf(r.days[0], 'g1')[0];
+    var s = blockSize(b);
+    ok(s.w >= 2, n + '名が幅1席の縦並びになっている');
+    ok(s.h <= 2, n + '名の奥行きが ' + s.h + '列');
+  });
+});
+
+test('5名は2列以内に収まる（前後に間延びしない）', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 5)], days: 1 });
+  var b = blocksOf(r.days[0], 'g1')[0];
+  var s = blockSize(b);
+  ok(s.h <= 2, '5名の奥行きが ' + s.h + '列');
+  eq(b.seatIds.length, 5, '席数');
+});
+
+test('いろいろな込み具合でも、形の決まりを破らない', function () {
+  var patterns = [
+    [2, 2, 2, 2, 2, 2],
+    [1, 1, 1, 1, 2, 3, 4],
+    [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    [6, 5, 4, 3, 2, 1, 6, 5, 4, 3],
+    [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3],
+    [8, 7, 6, 5, 4, 3, 2, 1, 2, 3]
+  ];
+  patterns.forEach(function (sizes, pi) {
+    var groups = sizes.map(function (n, i) { return group('g' + i, n); });
+    ['11x45', '12x49'].forEach(function (type) {
+      var r = S.assign({ layoutType: type, groups: groups, days: 2 });
+      r.days.forEach(function (day, di) {
+        var bad = badBlocks(day);
+        // 奥行き3列以上になるのは、警告が出ているときだけ
+        bad.forEach(function (b) {
+          var warned = r.warnings.some(function (w) {
+            return w.type === 'deep-block' && w.groupId === b.groupId;
+          });
+          ok(warned, 'パターン' + pi + '(' + type + ') ' + (di + 1) + '日目：' +
+            b.groupId + ' が ' + blockSize(b).w + '席幅×' + blockSize(b).h + '列なのに警告なし');
+        });
+      });
+    });
+  });
+});
+
+test('ほぼ満席でも、形の決まりを破らずに全員が座れる', function () {
+  var groups = fullHouseGroups();
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  eq(Object.keys(r.days[0].placements).length, 42, '着席した人数');
+  eq(badBlocks(r.days[0]).length, 0, '形の決まりを破ったブロック: ' +
+    badBlocks(r.days[0]).map(function (b) { return b.groupId; }).join(','));
+  eq(r.warnings.filter(function (w) { return w.type === 'deep-block'; }).length, 0, '前後に長い形の警告');
+});
+
+test('満席近くでは、前後に長い形にせず分割を選ぶ', function () {
+  var groups = [];
+  for (var i = 1; i <= 13; i++) groups.push(group('g' + i, 3)); // 39名／43席
+  groups.push(group('big', 4));
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  eq(badBlocks(r.days[0]).length, 0, '前後に長いブロックができた');
+  // 分割してでも2列以内を守る
+  r.days[0].blocks.forEach(function (b) {
+    ok(blockSize(b).h <= 2, b.groupId + ' の奥行き');
+  });
+});
+
+test('手で縦長にしてしまったら、見直しで注意が出る', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 3), group('g2', 4)], days: 1 });
+  var day = r.days[0];
+  eq(S.inspectDay(r.layout, r.groups, day).length, 0, '動かす前');
+
+  // g1 の1席を、前後に離れた席へ動かして縦長のかたまりを作る
+  var seats = day.seatsOfGroup['g1'];
+  var top = seats.map(seatRow).sort(function (a, b) { return a - b; })[0];
+  var target = 'r' + (top + 2) + '-' + seatCol(seats[0]);
+  var free = r.layout.seats.filter(function (s) {
+    return s.id === target && !day.placements[s.id] && !day.reserved[s.id];
+  });
+  if (free.length) {
+    S.swapSeats(r.layout, day, seats[seats.length - 1], target);
+    var deep = S.inspectDay(r.layout, r.groups, day).filter(function (i) {
+      return i.type === 'deep-block' || i.type === 'vertical-pair' || i.type === 'split';
+    });
+    ok(deep.length >= 1, '縦長にしたのに注意が出ない');
+  }
+});
+
 console.log('\n--- 3の4. 失敗したときの理由コード ---');
 
 test('業務席を指定したら crew-seat', function () {
@@ -707,7 +838,7 @@ test('警告が出るのは、その日に実際に逸脱している日だけ',
 
 console.log('\n--- 3の8. ほぼ満席のとき ---');
 
-// 見本（ほぼ満席）と同じ構成：42名／43席、前席オプション4組11名、1名客3組
+// （fullHouseGroups は下の「ほぼ満席」節で定義しています）
 function fullHouseGroups() {
   var M = 'male', F = 'female';
   return [
