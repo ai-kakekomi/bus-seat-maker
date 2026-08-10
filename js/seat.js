@@ -651,16 +651,6 @@
       }
     }
 
-    /** グループを座席表から取り除く */
-    function removeGroup(groupId) {
-      [day.placements, day.reserved, day.blocked].forEach(function (map) {
-        Object.keys(map).forEach(function (id) {
-          var owner = map === day.placements ? map[id].groupId : map[id];
-          if (owner === groupId) delete map[id];
-        });
-      });
-    }
-
     /**
      * グループ1組ぶんを置く。1つの四角に収まらないときは分割する。
      * @returns {array} 出た注意の一覧
@@ -829,24 +819,8 @@
       neighborsOf: neighborsOf,
       findRect: findRect,
       applyRect: applyRect,
-      removeGroup: removeGroup,
       placeGroup: placeGroup
     };
-  }
-
-  /** そのグループが占めている四角の左上（いちばん前・いちばん左）の席 */
-  function originOfGroup(day, groupId) {
-    var row = null, col = null;
-    function check(id, owner) {
-      if (owner !== groupId) return;
-      var m = /^r(\d+)-(\d+)$/.exec(id);
-      if (!m) return;
-      var r = Number(m[1]), c = Number(m[2]);
-      if (row === null || r < row || (r === row && c < col)) { row = r; col = c; }
-    }
-    Object.keys(day.placements).forEach(function (id) { check(id, day.placements[id].groupId); });
-    Object.keys(day.reserved || {}).forEach(function (id) { check(id, day.reserved[id]); });
-    return row === null ? null : { row: row, col: col };
   }
 
   function refreshDay(layout, day) {
@@ -1112,114 +1086,14 @@
   }
 
   /* ---------------------------------------------------------
-   * 手動調整：グループごと動かす
+   * 席をひとつずつ入れ替えるための道具
    * ------------------------------------------------------- */
-
-  function snapshot(day) {
-    return JSON.stringify({ p: day.placements, r: day.reserved, b: day.blocked });
-  }
-  function restore(day, snap) {
-    var s = JSON.parse(snap);
-    day.placements = s.p; day.reserved = s.r; day.blocked = s.b;
-  }
-  function groupById(groups, id) {
-    for (var i = 0; i < groups.length; i++) if (groups[i].id === id) return groups[i];
-    return null;
-  }
-
-  /**
-   * グループを、指定した席を起点に動かす。
-   * その席にぴったり置けないときは、その列から近いところに置き直します。
-   * @returns {object} { ok, reason, groupId, size, seatId, warnings }
-   *   reason は失敗の理由コード。日本語の文にするのは画面側（app.js）の仕事です。
-   */
-  function moveGroup(layout, groups, day, groupId, targetSeatId) {
-    var g = groupById(groups, groupId);
-    if (!g) return { ok: false, reason: 'group-not-found' };
-
-    var seat = seatById(layout, targetSeatId);
-    if (!seat) return { ok: false, reason: 'seat-not-found', seatId: targetSeatId };
-    if (seat.isCrew) return { ok: false, reason: 'crew-seat', seatId: targetSeatId };
-
-    var owner = ownerOfSeat(day, targetSeatId);
-    if (owner === groupId) {
-      return { ok: false, reason: 'same-group', groupId: groupId, seatId: targetSeatId };
-    }
-
-    var origin = { row: seat.row, col: seat.col };
-    var snap = snapshot(day);
-    var placer = createPlacer(layout, day);
-    placer.removeGroup(groupId);
-
-    var warnings = placer.placeGroup(g, { origin: origin, fromRow: origin.row, ignoreFront: true });
-    if (!warnings.some(function (w) { return w.type === 'no-seat'; })) resolveGenders(layout, groups, day);
-    if (warnings.some(function (w) { return w.type === 'no-seat'; })) {
-      restore(day, snap);
-      refreshDay(layout, day);
-      return { ok: false, reason: 'no-room', groupId: groupId, size: g.size, seatId: targetSeatId };
-    }
-    refreshDay(layout, day);
-    return { ok: true, reason: 'moved', groupId: groupId, seatId: targetSeatId, warnings: warnings };
-  }
-
-  /**
-   * 2つのグループの場所を入れ替える。
-   * 人数が違う場合は、相手のいた場所を起点に置き直します。
-   * @returns {object} { ok, reason, groupId, otherGroupId, size, warnings }
-   */
-  function swapGroups(layout, groups, day, groupIdA, groupIdB) {
-    var ga = groupById(groups, groupIdA);
-    var gb = groupById(groups, groupIdB);
-    if (!ga) return { ok: false, reason: 'group-not-found', groupId: groupIdA };
-    if (!gb) return { ok: false, reason: 'group-not-found', groupId: groupIdB };
-    if (groupIdA === groupIdB) {
-      return { ok: false, reason: 'same-group', groupId: groupIdA };
-    }
-
-    var oa = originOfGroup(day, groupIdA);
-    var ob = originOfGroup(day, groupIdB);
-    if (!oa) return { ok: false, reason: 'not-seated', groupId: groupIdA };
-    if (!ob) return { ok: false, reason: 'not-seated', groupId: groupIdB };
-
-    var snap = snapshot(day);
-    var placer = createPlacer(layout, day);
-    placer.removeGroup(groupIdA);
-    placer.removeGroup(groupIdB);
-
-    var wa = placer.placeGroup(ga, { origin: ob, fromRow: ob.row, ignoreFront: true });
-    var wb = placer.placeGroup(gb, { origin: oa, fromRow: oa.row, ignoreFront: true });
-    var failed = null;
-    if (!wa.concat(wb).some(function (w) { return w.type === 'no-seat'; })) resolveGenders(layout, groups, day);
-    if (wa.some(function (w) { return w.type === 'no-seat'; })) failed = ga;
-    else if (wb.some(function (w) { return w.type === 'no-seat'; })) failed = gb;
-
-    if (failed) {
-      restore(day, snap);
-      refreshDay(layout, day);
-      return {
-        ok: false, reason: 'no-room-swap',
-        groupId: failed.id, size: failed.size,
-        otherGroupId: failed.id === groupIdA ? groupIdB : groupIdA
-      };
-    }
-    refreshDay(layout, day);
-    return {
-      ok: true, reason: 'swapped',
-      groupId: groupIdA, otherGroupId: groupIdB,
-      warnings: wa.concat(wb)
-    };
-  }
 
   function seatById(layout, seatId) {
     for (var i = 0; i < layout.seats.length; i++) {
       if (layout.seats[i].id === seatId) return layout.seats[i];
     }
     return null;
-  }
-  function ownerOfSeat(day, seatId) {
-    var p = day.placements[seatId];
-    if (p) return p.groupId;
-    return (day.reserved || {})[seatId] || null;
   }
 
   /* ---------------------------------------------------------
@@ -1989,12 +1863,9 @@
     sharedPairs: sharedPairs,
     resolveGenders: resolveGenders,
     relaxGenderConflicts: relaxGenderConflicts,
-    originOfGroup: originOfGroup,
     inspectDay: inspectDay,
     issueKey: issueKey,
     swapSeats: swapSeats,
-    moveGroup: moveGroup,
-    swapGroups: swapGroups,
     maru: maru
   };
 });

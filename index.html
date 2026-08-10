@@ -136,22 +136,12 @@
         <button type="button" class="btn" id="print">印刷する（PDFで保存もできます）</button>
       </div>
       <div class="swap-hint">
-        <p class="mode-row">
-          <strong>手で直せます。</strong>直し方を選んでください。
+        <p class="mode-row"><strong>手で直せます。</strong></p>
+        <p class="help">
+          入れ替えたい席を1つタップして、次に入れ替え先の席をタップすると、2つの席が入れ替わります。
+          空いている席とも入れ替えられます。選んだ席は赤く囲まれます。
+          同じ席をもう一度タップすると、選び直せます。
         </p>
-        <label class="toggle-line">
-          <input type="radio" name="edit-mode" value="group" id="mode-group">
-          <span><strong>グループごと動かす</strong>（おすすめ）<br>
-            <span class="help">動かしたいグループの席をタップ → 行き先をタップ。
-              別のグループをタップすればその組と場所を交換、空席をタップすればそこへ引っ越します。
-              人数が違っても、形を作り直して置き直します。</span></span>
-        </label>
-        <label class="toggle-line">
-          <input type="radio" name="edit-mode" value="seat" id="mode-seat">
-          <span><strong>1席ずつ入れ替える</strong><br>
-            <span class="help">席を1つタップ → 入れ替え先の席をタップ。空席とも入れ替えられます。</span></span>
-        </label>
-        <p class="help">同じところをもう一度タップすると、選び直せます。</p>
       </div>
       <p id="flash" class="flash" style="display:none"></p>
       <p class="help">

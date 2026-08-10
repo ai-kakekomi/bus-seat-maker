@@ -16,13 +16,11 @@
     startDate: '',
     layoutType: '11x45',
     useRealName: false,
-    editMode: 'group', // 'group' = グループごと動かす / 'seat' = 1席ずつ入れ替える
     groups: []
   };
 
   var result = null;       // BusSeat.assign() の結果
   var selectedSeat = null; // 入れ替え待ちの席（1席ずつモード）
-  var selection = null;    // 動かす相手として選んだグループ（グループごとモード）
   var manualEdited = {};   // 手で直した日（その日だけ見直しの注意を出す）
 
   /* ---------------- ちいさな道具 ---------------- */
@@ -66,7 +64,6 @@
     state.startDate = data.startDate || '';
     state.layoutType = S.LAYOUTS[data.layoutType] ? data.layoutType : '11x45';
     state.useRealName = !!data.useRealName;
-    state.editMode = data.editMode === 'seat' ? 'seat' : 'group';
     state.groups = (data.groups || []).map(function (g) {
       var size = Math.max(1, Number(g.size) || 1);
       var members = [];
@@ -218,7 +215,6 @@
    * state.groups をコピーしてから渡すので、前回の結果が混ざることはありません。
    */
   function recompute() {
-    selection = null;
     selectedSeat = null;
     manualEdited = {};
     result = S.assign({
@@ -407,11 +403,17 @@
   function busTable(day, dayIndex, labels) {
     var layout = result.layout;
     var wrap = el('div', 'bus');
-    var selectedGroup = selection && selection.dayIndex === dayIndex ? selection.groupId : null;
+
+    // 別グループの男女がとなり合っている席（オレンジの枠で知らせる）
+    var mixedSeats = {};
+    (day.shared || []).forEach(function (sh) {
+      if (!sh.mixedGender) return;
+      sh.seatIds.forEach(function (sid) { mixedSeats[sid] = true; });
+    });
 
     // 座席のマス
     layout.seats.forEach(function (seat) {
-      var cell = seatCell(seat, day, dayIndex, selectedGroup);
+      var cell = seatCell(seat, day, dayIndex, mixedSeats);
       cell.style.gridRow = String(seat.row);
       cell.style.gridColumn = String(S.trackOf(layout, seat.row, seat.col));
       wrap.appendChild(cell);
@@ -421,9 +423,8 @@
     var labelDone = {};
     (day.blocks || []).forEach(function (b) {
       var color = result.colors[b.groupId];
-      var picked = b.groupId === selectedGroup ? ' is-picked' : '';
       // 席が2か所以上に分かれてしまったグループは、赤い太枠ですぐ分かるようにする
-      if (b.isSplit) picked += ' is-split';
+      var picked = b.isSplit ? ' is-split' : '';
 
       b.cells.forEach(function (c) {
         var line = el('div', 'blk c' + color + picked +
@@ -496,7 +497,7 @@
     return g && g.frontOption ? ' is-front-opt' : '';
   }
 
-  function seatCell(seat, day, dayIndex, selectedGroup) {
+  function seatCell(seat, day, dayIndex, mixedSeats) {
     var cell = el('div', 'seat');
     cell.appendChild(el('span', 'row-no', seat.row + '-' + seat.col));
 
@@ -513,16 +514,20 @@
       cell.className += ' g' + result.colors[p.groupId] + frontClass(p.groupId);
       var mark = p.gender === 'male' ? '男' : (p.gender === 'female' ? '女' : '');
       cell.appendChild(el('span', 'seat-mark', mark));
-      if (selectedGroup && p.groupId === selectedGroup) cell.className += ' is-picked-seat';
     } else if (reservedBy) {
       // 枠の中の空席（そのグループのために取ってある席）
       cell.className += ' g' + result.colors[reservedBy] + frontClass(reservedBy) + ' is-empty';
       cell.appendChild(el('span', 'seat-mark', '空'));
-      if (selectedGroup && reservedBy === selectedGroup) cell.className += ' is-picked-seat';
     } else {
       // 枠の外の空席（相席を避けるために空けてある席も、見た目はふつうの空席）
       cell.className += ' is-empty';
       cell.appendChild(el('span', 'seat-mark', '空'));
+    }
+
+    // 別グループの男女がとなり合っている席は、オレンジの枠と「男女」の印で知らせる
+    if (mixedSeats && mixedSeats[seat.id]) {
+      cell.className += ' is-mixed';
+      cell.appendChild(el('span', 'seat-warn', '男女'));
     }
 
     if (selectedSeat && selectedSeat.dayIndex === dayIndex && selectedSeat.seatId === seat.id) {
@@ -535,54 +540,11 @@
 
   /* ---------------- 座席をタップしたとき ---------------- */
 
-  function ownerAt(day, seatId) {
-    var p = day.placements[seatId];
-    if (p) return p.groupId;
-    return (day.reserved || {})[seatId] || null;
-  }
-
+  /**
+   * 席を1つタップ → 入れ替え先の席をタップ、で2つの席を入れ替えます。
+   * 同じ席をもう一度タップすると選び直せます。
+   */
   function onSeatClick(dayIndex, seatId) {
-    if (state.editMode === 'seat') return onSeatModeClick(dayIndex, seatId);
-    return onGroupModeClick(dayIndex, seatId);
-  }
-
-  // グループごと動かすモード
-  function onGroupModeClick(dayIndex, seatId) {
-    var day = result.days[dayIndex];
-    var owner = ownerAt(day, seatId);
-
-    if (!selection || selection.dayIndex !== dayIndex) {
-      if (!owner) {
-        flash('先に、動かしたいグループの席をタップしてください。');
-        return;
-      }
-      selection = { dayIndex: dayIndex, groupId: owner };
-      renderSheets();
-      return;
-    }
-
-    if (owner === selection.groupId) { // 同じグループをもう一度 → 取り消し
-      selection = null;
-      renderSheets();
-      return;
-    }
-
-    var res = owner
-      ? S.swapGroups(result.layout, result.groups, day, selection.groupId, owner)
-      : S.moveGroup(result.layout, result.groups, day, selection.groupId, seatId);
-
-    if (res.ok) {
-      manualEdited[dayIndex] = true;
-      selection = null;
-      flash(成功の一言(res));
-    } else {
-      flash(失敗の理由(res));
-    }
-    renderSheets();
-  }
-
-  // 1席ずつ入れ替えるモード
-  function onSeatModeClick(dayIndex, seatId) {
     if (!selectedSeat || selectedSeat.dayIndex !== dayIndex) {
       selectedSeat = { dayIndex: dayIndex, seatId: seatId };
     } else if (selectedSeat.seatId === seatId) {
@@ -600,14 +562,6 @@
     renderSheets();
   }
 
-  /** グループの呼び名（人数つき） */
-  function 呼び名(groupId) {
-    var l = null;
-    (result.labels || []).forEach(function (x) { if (x.groupId === groupId) l = x; });
-    if (!l) return 'このグループ';
-    return l.label + '（' + l.size + '名）';
-  }
-
   /** seat.js が返す失敗理由コードを、日本語の文にする */
   function 失敗の理由(res) {
     switch (res.reason) {
@@ -615,27 +569,11 @@
         return '業務席にはお客様を配置できません。';
       case 'same-seat':
         return '同じ席が選ばれています。別の席を選んでください。';
-      case 'same-group':
-        return '移動先が同じグループの席です。別の場所を選んでください。';
-      case 'no-room':
-        return 呼び名(res.groupId) + 'が入るまとまった空きがありません。ほかの場所を試してください。';
-      case 'no-room-swap':
-        return 呼び名(res.groupId) + 'が入るまとまった空きがないため、入れ替えできませんでした。';
-      case 'not-seated':
-        return 'まだ座席が決まっていないグループです。先に「自動で席を決める」を押してください。';
-      case 'group-not-found':
       case 'seat-not-found':
         return '対象が見つかりませんでした。もう一度選び直してください。';
       default:
-        return '動かせませんでした。';
+        return '入れ替えできませんでした。';
     }
-  }
-
-  /** うまくいったときの一言（注意があればそれも伝える） */
-  function 成功の一言(res) {
-    var ws = res.warnings || [];
-    if (ws.length) return ws[0].message;
-    return res.reason === 'swapped' ? '2組の場所を入れ替えました。' : '移動しました。';
   }
 
   function flash(text) {
@@ -749,8 +687,6 @@
     $('start-date').value = state.startDate;
     $('layout-type').value = state.layoutType;
     $('use-real-name').checked = state.useRealName;
-    $('mode-group').checked = state.editMode !== 'seat';
-    $('mode-seat').checked = state.editMode === 'seat';
     updateLayoutInfo();
   }
 
@@ -774,17 +710,6 @@
       state.layoutType = this.value; updateLayoutInfo(); changed();
     });
     $('use-real-name').addEventListener('change', function () { state.useRealName = this.checked; changed(); });
-
-    ['mode-group', 'mode-seat'].forEach(function (id) {
-      $(id).addEventListener('change', function () {
-        state.editMode = this.value;
-        selection = null;
-        selectedSeat = null;
-        flash('');
-        renderSheets();
-        save();
-      });
-    });
 
     $('add-group').addEventListener('click', function () { addGroup(2); changed(); });
     $('clear-groups').addEventListener('click', function () {

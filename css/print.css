@@ -99,7 +99,6 @@
   .blk.br { border-right-width: .7mm; }
   .blk.bb { border-bottom-width: .7mm; }
   .blk.bl { border-left-width: .7mm; }
-  .blk.is-picked { border-color: inherit; }
 
   /* 分かれてしまったグループは、印刷でも赤い太枠で目立たせる */
   .blk.is-split { border-color: #c00000 !important; border-style: solid !important; }
@@ -143,7 +142,17 @@
   .block-label.is-narrow .block-count { font-size: 7.4pt; }
   .blk-free { border: .7mm dashed #555 !important; margin: -.7mm; }
   .blk-free .block-label { font-size: 10pt; }
-  .seat.is-picked-seat { box-shadow: none !important; }
+
+  /* 男女がとなり合っている席。分割（赤の実線）とは線の種類で区別できます */
+  .seat.is-mixed {
+    border: .8mm dashed #b35a00 !important;
+    box-shadow: none !important;
+  }
+  .seat .seat-warn {
+    left: .5mm; bottom: .2mm; font-size: 6pt; padding: 0 .3mm;
+    background: #b35a00 !important; color: #fff !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
 
   .legend { font-size: 7.5pt; margin-top: 2mm; }
   .legend .lg-plain { background-color: #fff !important; --stripe: #b9c2c8; }
