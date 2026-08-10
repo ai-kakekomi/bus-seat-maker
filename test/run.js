@@ -705,6 +705,111 @@ test('警告が出るのは、その日に実際に逸脱している日だけ',
   eq(S.inspectDay(r.layout, r.groups, r.days[2]).length, 0, '3日目');
 });
 
+console.log('\n--- 3の8. ほぼ満席のとき ---');
+
+// 見本（ほぼ満席）と同じ構成：42名／43席、前席オプション4組11名、1名客3組
+function fullHouseGroups() {
+  var M = 'male', F = 'female';
+  return [
+    group('f1', 2, { frontOption: true, genders: [M, F] }),
+    group('f2', 2, { frontOption: true, genders: [F, F] }),
+    group('f3', 3, { frontOption: true, genders: [M, M, F] }),
+    group('f4', 4, { frontOption: true, genders: [M, F, F, M] }),
+    group('a', 4, { genders: [M, F, F, F] }),
+    group('b', 3, { genders: [M, M, F] }),
+    group('c', 5, { genders: [M, M, M, F, F] }),
+    group('d', 1, { genders: [M] }),
+    group('e', 2, { genders: [M, F] }),
+    group('h', 3, { genders: [F, F, F] }),
+    group('i', 1, { genders: [F] }),
+    group('j', 6, { genders: [M, M, F, F, F, M] }),
+    group('k', 1, { genders: [M] }),
+    group('l', 5, { genders: [F, F, M, M, F] })
+  ];
+}
+
+test('ほぼ満席（42名／43席）でも全員が着席し、握りつぶしがない', function () {
+  var groups = fullHouseGroups();
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  eq(r.totalPeople, 42, '総人数');
+  eq(r.spareSeats, 1, '空席');
+  eq(Object.keys(r.days[0].placements).length, 42, '実際に座った人数');
+  eq(r.warnings.filter(function (w) { return w.type === 'no-seat'; }).length, 0, '席不足の警告');
+  groups.forEach(function (g) {
+    eq((r.days[0].seatsOfGroup[g.id] || []).length, g.size, g.id + ' の席数');
+  });
+});
+
+test('ほぼ満席では相席モードに自動で切り替わる', function () {
+  var r = S.assign({ layoutType: '11x45', groups: fullHouseGroups(), days: 1 });
+  eq(r.sharing, true, '相席モード');
+  ok(r.days[0].shared.length > 0, '相席が1件も起きていない');
+  eq(Object.keys(r.days[0].reserved).length, 0, '取り置き空席（窮屈なので0のはず）');
+});
+
+test('ほぼ満席でも男女の相席は起きない', function () {
+  var r = S.assign({ layoutType: '11x45', groups: fullHouseGroups(), days: 1 });
+  var mixed = r.days[0].shared.filter(function (sh) { return sh.mixedGender; });
+  eq(mixed.length, 0, '男女が並んだ席: ' + mixed.map(function (m) { return m.seatIds.join('+'); }).join(','));
+  eq(r.warnings.filter(function (w) { return w.type === 'mixed-gender'; }).length, 0, '男女相席の警告');
+});
+
+test('前席オプションが定員を超えると、理由の分かる警告が出る', function () {
+  var r = S.assign({ layoutType: '11x45', groups: fullHouseGroups(), days: 1 });
+  var w = r.warnings.filter(function (x) { return x.type === 'front-overflow'; });
+  eq(w.length, 1, '前席溢れの警告');
+  ok(w[0].message.indexOf('10席') >= 0, '前3列の定員が書かれていない: ' + w[0].message);
+  ok(w[0].message.indexOf('4列目以降') >= 0, 'どうなるかが書かれていない: ' + w[0].message);
+  ok(/お客様[A-Z]+（\d+名）/.test(w[0].message), '対象と人数が書かれていない: ' + w[0].message);
+});
+
+test('分かれてしまったときは、人数と理由が分かる警告が出る', function () {
+  var r = S.assign({ layoutType: '11x45', groups: fullHouseGroups(), days: 1 });
+  var w = r.warnings.filter(function (x) { return x.type === 'split'; });
+  ok(w.length >= 1, '分割の警告が出ていない');
+  ok(/お客様[A-Z]+（\d+名）は、\d+名がまとまって座れる空きがなかったため/.test(w[0].message),
+    '理由が書かれていない: ' + w[0].message);
+});
+
+test('「分かれました」の警告は、結果としてつながっていた場合には出さない', function () {
+  var r = S.assign({ layoutType: '11x45', groups: fullHouseGroups(), days: 1 });
+  var blocks = {};
+  r.days[0].blocks.forEach(function (b) { blocks[b.groupId] = (blocks[b.groupId] || 0) + 1; });
+  r.warnings.filter(function (w) { return w.type === 'split'; }).forEach(function (w) {
+    ok(blocks[w.groupId] > 1, w.groupId + ' はつながっているのに分割の警告が出ている');
+  });
+});
+
+test('ほぼ満席でも無限ループにならず、すぐ終わる', function () {
+  var t0 = Date.now();
+  for (var i = 0; i < 20; i++) S.assign({ layoutType: '11x45', groups: fullHouseGroups(), days: 3 });
+  var ms = Date.now() - t0;
+  ok(ms < 8000, '20回×3日の割り当てに ' + ms + 'ms かかった');
+});
+
+test('自動割り当ての注意は「もともとの注意」として記録される', function () {
+  var r = S.assign({ layoutType: '11x45', groups: fullHouseGroups(), days: 1 });
+  var day = r.days[0];
+  ok(day.baselineIssues.length > 0, 'ほぼ満席なら、もともとの注意があるはず');
+
+  var issues = S.inspectDay(r.layout, r.groups, day);
+  eq(issues.filter(function (i) { return !i.preexisting; }).length, 0,
+    '自動直後なのに「手で直して増えた注意」がある');
+  ok(issues.every(function (i) { return i.preexisting; }), 'もともとの印が付いていない');
+});
+
+test('手で直して増えた注意だけが preexisting=false になる', function () {
+  var groups = [group('f1', 2, { frontOption: true }), group('g1', 4), group('g2', 4)];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  var day = r.days[0];
+  eq(day.baselineIssues.length, 0, '空いているので、もともとの注意はなし');
+
+  S.moveGroup(r.layout, r.groups, day, 'f1', 'r8-1');
+  var issues = S.inspectDay(r.layout, r.groups, day);
+  eq(issues.length, 1, '注意の数');
+  eq(issues[0].preexisting, false, '手で直して増えた注意');
+});
+
 console.log('\n--- 4. 複数日と巡回シフト ---');
 
 function starts(groups, dayCount) {

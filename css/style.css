@@ -15,6 +15,7 @@
   --warn-bg: #fff5e0;
   --error: #b3261e;
   --error-bg: #fdecea;
+  --pass-line: #1e6b3a;
   --radius: 10px;
 
   /* 座席マスの大きさ（中身によらず固定） */
@@ -295,6 +296,15 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 }
 .manual-check-head { margin: 0; font-weight: 700; font-size: .95rem; }
 .manual-check .msg-list { margin-top: .45rem; }
+
+/* 問題がなかったときは緑の枠 */
+.manual-check.is-ok {
+  border-color: #b9ddc7; border-left-color: var(--pass-line); background: #eef7f1;
+}
+.manual-check.is-ok .manual-check-head { color: var(--pass-line); }
+.manual-check .msg-list li.is-preexisting {
+  background: #f1f4f6; border-color: var(--line); color: var(--fg-muted);
+}
 .flash {
   margin: .6rem 0 0; padding: .5rem .8rem; border-radius: 8px;
   background: #eef4f2; border: 1px solid var(--accent); font-size: .93rem;

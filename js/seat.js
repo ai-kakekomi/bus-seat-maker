@@ -538,6 +538,7 @@
       opt = opt || {};
       var warnings = [];
       var pad = sharing() ? false : true;
+      opt.frontCapacity = opt.frontCapacity || 0;
       var placedCount = 0;
       var warnedFront = false;
       var guard = 0;
@@ -564,7 +565,9 @@
               warnings.push({
                 type: 'front-overflow',
                 groupId: g.id,
-                message: '前席をご希望のグループが前から3列目までに収まりませんでした（お客様' + alpha(g.order + 1) + '）。'
+                message: '前のお席をご希望のグループが多いため、前から3列目まで（お客様が座れるのは' +
+                  opt.frontCapacity + '席）に収まりませんでした。お客様' + alpha(g.order + 1) +
+                  '（' + g.size + '名）は4列目以降になります。'
               });
             }
           }
@@ -581,7 +584,8 @@
             warnings.push({
               type: 'split',
               groupId: g.id,
-              message: 'お客様' + alpha(g.order + 1) + 'は、席の空きぐあいの都合で2か所以上に分かれました。'
+              message: 'お客様' + alpha(g.order + 1) + '（' + g.size + '名）は、' + g.size +
+                '名がまとまって座れる空きがなかったため、2か所以上に分かれました。'
             });
           }
         }
@@ -590,7 +594,8 @@
           warnings.push({
             type: 'no-seat',
             groupId: g.id,
-            message: '座席が足りません。お客様' + alpha(g.order + 1) + 'の' + left + '名分を配置できませんでした。'
+            message: '座席が足りません。お客様' + alpha(g.order + 1) + 'の' + left +
+              '名分を置く場所がありませんでした。人数を減らすか、座席の多い車両を選んでください。'
           });
           break;
         }
@@ -663,6 +668,9 @@
       warnings: warnings
     };
     var placer = createPlacer(layout, day);
+    var frontCapacity = layout.seats.filter(function (x) {
+      return !x.isCrew && x.row <= FRONT_ROWS;
+    }).length;
 
     // 前席オプションのグループを先に。
     // 前席組は「前3列のなか」で、それ以外は「バス全体」で、日ごとに並べ始める位置をずらす。
@@ -672,15 +680,26 @@
     day.groupOrder = ordered.map(function (g) { return g.id; });
 
     ordered.forEach(function (g) {
-      placer.placeGroup(g).forEach(function (w) { warnings.push(w); });
+      placer.placeGroup(g, { frontCapacity: frontCapacity }).forEach(function (w) { warnings.push(w); });
     });
 
     refreshDay(layout, day);
+
+    // 置くときは2回に分けたが、結果としてつながっていた場合は「分かれました」を取り消す
+    var blockCount = {};
+    day.blocks.forEach(function (b) { blockCount[b.groupId] = (blockCount[b.groupId] || 0) + 1; });
+    for (var wi = warnings.length - 1; wi >= 0; wi--) {
+      if (warnings[wi].type === 'split' && (blockCount[warnings[wi].groupId] || 0) <= 1) {
+        warnings.splice(wi, 1);
+      }
+    }
+
     day.shared.forEach(function (sh) {
       if (sh.mixedGender) {
         warnings.push({
           type: 'mixed-gender',
-          message: sh.row + '列目で、男女が並んで座っています。手動で入れ替えてください。'
+          message: sh.row + '列目で、別のグループの男女が並んで座っています。' +
+            '席がほぼ埋まっていて、ほかに組み合わせがありませんでした。気になる場合は手で入れ替えてください。'
         });
       }
     });
@@ -809,6 +828,11 @@
    * 手で動かして決まりから外れたときだけ、注意として拾い上げます。
    * ------------------------------------------------------- */
 
+  /** 注意を見分けるための鍵（同じ内容かどうかの判定に使う） */
+  function issueKey(i) {
+    return i.type + '|' + (i.groupId || i.seatId || i.row || '');
+  }
+
   function inspectDay(layout, groups, day) {
     var issues = [];
     var byId = {};
@@ -877,12 +901,20 @@
 
     // 同じ内容の注意は1件にまとめる
     var seen = {};
-    return issues.filter(function (i) {
+    issues = issues.filter(function (i) {
       var key = i.type + '|' + i.message;
       if (seen[key]) return false;
       seen[key] = true;
       return true;
     });
+
+    // 自動で割り当てた時点から出ていた注意には印を付ける
+    // （手で直したせいで出たものと区別するため）
+    var base = {};
+    (day.baselineIssues || []).forEach(function (k) { base[k] = true; });
+    issues.forEach(function (i) { i.preexisting = !!base[issueKey(i)]; });
+
+    return issues;
   }
 
   /* ---------------------------------------------------------
@@ -1181,6 +1213,8 @@
         sharing: sharing
       });
       day.dayIndex = d;
+      // 自動で割り当てた直後の状態を「もともとの注意」として控えておく
+      day.baselineIssues = inspectDay(layout, groups, day).map(issueKey);
       days.push(day);
     }
 
@@ -1256,6 +1290,7 @@
     sharedPairs: sharedPairs,
     originOfGroup: originOfGroup,
     inspectDay: inspectDay,
+    issueKey: issueKey,
     swapSeats: swapSeats,
     moveGroup: moveGroup,
     swapGroups: swapGroups,

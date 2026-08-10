@@ -257,16 +257,21 @@
       msgs.push({ type: 'name', message: '同じ名字のお客様がいます。フルネームを入れると座席表で区別できます。' });
     }
 
-    if (msgs.length === 0) {
-      var p = el('p', 'callout', state.groups.length === 0
-        ? 'グループを入力すると、ここに座席表が出ます。'
-        : 'とくに問題は見つかりませんでした。' +
-          (result.sharing
-            ? '席に余裕がないため、別のグループどうしで並ぶ席（相席）があります。'
-            : '席に余裕があるので、別のグループと並ぶ席（相席）はありません。'));
-      box.appendChild(p);
+    if (state.groups.length === 0) {
+      box.appendChild(el('p', 'callout', 'グループを入力すると、ここに座席表が出ます。'));
       return;
     }
+
+    // 混み具合の説明は、注意が出ているときも必ず添える（なぜそうなったかが分かるように）
+    var seats = result.layout.usableSeatCount;
+    var 混み = 'お客様' + result.totalPeople + '名／お客様が座れる席' + seats + '席' +
+      (result.spareSeats >= 0 ? '（空席' + result.spareSeats + '席）。' : '（' + (-result.spareSeats) + '席不足）。') +
+      (result.sharing
+        ? '席に余裕がないため、別のグループどうしが並ぶ席（相席）が出ます。相席になるときは男女が並ばないようにしています。'
+        : '席に余裕があるので、別のグループと並ぶ席（相席）はありません。');
+    box.appendChild(el('p', 'callout', (msgs.length === 0 ? 'とくに問題は見つかりませんでした。' : '') + 混み));
+
+    if (msgs.length === 0) return;
 
     var ul = el('ul', 'msg-list');
     msgs.forEach(function (w) {
@@ -332,18 +337,37 @@
    * 手で直したあとの見直し。
    * 自動割り当ては決まりを守るので、手で直した日だけ点検します。
    * どの日の話か分かるよう、その日の座席表の真下に置きます。
+   * 問題がないときも「問題は見つかりませんでした」と緑の枠で出します。
    */
   function manualCheckBox(day, dayIndex) {
     if (!manualEdited[dayIndex]) return null;
-    var issues = S.inspectDay(result.layout, result.groups, day);
-    if (issues.length === 0) return null;
 
-    var card = el('div', 'manual-check no-print');
-    card.appendChild(el('p', 'manual-check-head',
-      'この座席表を手で直したあとの確認（' + issues.length + '件）　※印刷には出ません'));
-    var ul = el('ul', 'msg-list');
-    issues.forEach(function (i) { ul.appendChild(el('li', '', i.message)); });
-    card.appendChild(ul);
+    var issues = S.inspectDay(result.layout, result.groups, day);
+    // 「もともと出ていた注意」と「手で直したことで増えた注意」を分ける
+    var fresh = issues.filter(function (i) { return !i.preexisting; });
+    var old = issues.filter(function (i) { return i.preexisting; });
+    var ok = fresh.length === 0;
+
+    var card = el('div', 'manual-check no-print' + (ok ? ' is-ok' : ''));
+
+    var head;
+    if (ok && old.length === 0) {
+      head = 'この座席表を確認しました：問題は見つかりませんでした。';
+    } else if (ok) {
+      head = 'この座席表を確認しました：手で直したことで増えた問題はありません。';
+    } else {
+      head = 'この座席表を手で直したあとの確認（' + fresh.length + '件）';
+    }
+    card.appendChild(el('p', 'manual-check-head', head + '　※印刷には出ません'));
+
+    if (issues.length) {
+      var ul = el('ul', 'msg-list');
+      fresh.forEach(function (i) { ul.appendChild(el('li', '', i.message)); });
+      old.forEach(function (i) {
+        ul.appendChild(el('li', 'is-preexisting', '（はじめの割り当てのときから）' + i.message));
+      });
+      card.appendChild(ul);
+    }
     return card;
   }
 
@@ -575,13 +599,48 @@
 
   /* ---------------- 見本 ---------------- */
 
-  function sampleData() {
-    function g(size, genders, opt) {
-      opt = opt || {};
+  function sampleGroup(size, genders, opt) {
+    opt = opt || {};
+    return {
+      id: newId(), size: size,
+      members: genders.map(function (x) { return { gender: x }; }),
+      frontOption: !!opt.front, surname: opt.surname || '', fullName: opt.fullName || ''
+    };
+  }
+
+  /**
+   * 見本データ。
+   *  spacious … 空席が多いとき（相席なし・ゆったり配置）
+   *  full     … ほぼ満席のとき（相席あり・注意も出る、現場で起きやすい込み具合）
+   */
+  function sampleData(kind) {
+    var g = sampleGroup;
+    if (kind === 'full') {
       return {
-        id: newId(), size: size,
-        members: genders.map(function (x) { return { gender: x }; }),
-        frontOption: !!opt.front, surname: opt.surname || '', fullName: opt.fullName || ''
+        tourName: '日帰り信州そば街道めぐり',
+        busNo: '1号車',
+        days: 1,
+        startDate: '',
+        layoutType: '11x45',
+        useRealName: false,
+        groups: [
+          // 前のお席をご希望（有料オプション）が4組11名。前3列は10席なので溢れます
+          g(2, ['male', 'female'], { surname: '山田', front: true }),
+          g(2, ['female', 'female'], { surname: '小林', front: true }),
+          g(3, ['male', 'male', 'female'], { surname: '加藤', front: true }),
+          g(4, ['male', 'female', 'female', 'male'], { surname: '吉田', front: true }),
+          // 以下は通常の申し込み
+          g(4, ['male', 'female', 'female', 'female'], { surname: '佐藤' }),
+          g(3, ['male', 'male', 'female'], { surname: '鈴木' }),
+          g(5, ['male', 'male', 'male', 'female', 'female'], { surname: '田中' }),
+          g(1, ['male'], { surname: '伊藤' }),
+          g(2, ['male', 'female'], { surname: '高橋' }),
+          g(3, ['female', 'female', 'female'], { surname: '中村' }),
+          g(1, ['female'], { surname: '斎藤' }),
+          g(6, ['male', 'male', 'female', 'female', 'female', 'male'], { surname: '松本' }),
+          g(1, ['male'], { surname: '井上' }),
+          g(5, ['female', 'female', 'male', 'male', 'female'], { surname: '木村' })
+        ]
       };
     }
     return {
@@ -695,11 +754,13 @@
       if (this.files && this.files[0]) readFile(this.files[0]);
       this.value = '';
     });
-    $('load-sample').addEventListener('click', function () {
-      if (state.groups.length && !window.confirm('いまの入力を見本で置きかえます。よろしいですか？')) return;
-      applyData(sampleData());
-      syncFormFromState();
-      changed();
+    [['load-sample', 'spacious'], ['load-sample-full', 'full']].forEach(function (pair) {
+      $(pair[0]).addEventListener('click', function () {
+        if (state.groups.length && !window.confirm('いまの入力を見本で置きかえます。よろしいですか？')) return;
+        applyData(sampleData(pair[1]));
+        syncFormFromState();
+        changed();
+      });
     });
   }
 
