@@ -249,6 +249,53 @@
 
   // 横幅ごとの好み。2席（片側にきれいに収まる）がいちばん良い。
   var WIDTH_PENALTY = { 1: 4, 2: 0, 3: 1.2, 4: 0.5, 5: 0 };
+
+  /**
+   * 人数ごとの「理想のかたち」。実際の座席表（阪急交通社の現場）に合わせています。
+   * w = 横幅（通路をまたぐぶんも数える）／ h = 前後の列数。
+   * 人数が w×h より少ない形は、角が欠けたかたちになります。
+   *
+   *   1名  ■          2名  ■■          3名  ■■｜■     （通路をまたいだ横一列）
+   *
+   *   4名  ■■        5名  ■■｜■      6名  ■■｜■■
+   *        ■■             ■■｜□           ■■｜□□
+   *
+   * 左右どちらに寄せるか、前後どちらに寄せるかは区別しません
+   * （パズルとして解けることを優先します）。
+   */
+  var IDEAL_SHAPES = {
+    1: { w: 1, h: 1 },
+    2: { w: 2, h: 1 },
+    3: { w: 3, h: 1 },
+    4: { w: 2, h: 2 },
+    5: { w: 3, h: 2 },
+    6: { w: 4, h: 2 }
+  };
+  var IDEAL_BONUS = 2.5; // 理想のかたちに収まったときの、ごほうび点（他の好みより強い）
+  var ROW_LOOKAHEAD = 1; // 理想のかたちを求めて、うしろの列を何列ぶんまで見にいくか
+  var ROW_PENALTY = 1.0; // 1列うしろにずらすことへの減点（IDEAL_BONUS より小さくしてある）
+
+  /** 席のかたまりの外わく（何列ぶん × 何席ぶんに収まっているか） */
+  function cellBox(cells) {
+    var rows = cells.map(function (c) { return c.row; });
+    var cols = cells.map(function (c) { return c.col; });
+    return {
+      h: Math.max.apply(null, rows) - Math.min.apply(null, rows) + 1,
+      w: Math.max.apply(null, cols) - Math.min.apply(null, cols) + 1
+    };
+  }
+
+  /**
+   * 理想のかたちに収まっているか。収まっていれば減点（＝ごほうび）を返します。
+   * 外わくの大きさで見るので、6名なら「4席の横一列＋2席」だけが理想となり、
+   * 同じ2席落としでも「3席×2列」のかたちは理想になりません。
+   */
+  function idealBonus(count, cells) {
+    var want = IDEAL_SHAPES[count];
+    if (!want || !cells || cells.length !== count) return 0;
+    var box = cellBox(cells);
+    return (box.w === want.w && box.h === want.h) ? -IDEAL_BONUS : 0;
+  }
   var MAX_WASTE = 2;      // 四角にするために空けてよい席数の上限
   var MAX_DEPTH = 2;      // かたまりの奥行き（前後に何列ぶんまで広げてよいか）
   var AISLE_BALANCE = 0.5; // 通路をまたいで人数が割れることへの好みの重み
@@ -484,7 +531,15 @@
       if (count <= 1) allowPad = false;
 
       var rows = rowOrder(opt);
+      // 前から詰めるのが基本ですが、1〜2列うしろへずらすだけで理想のかたちに収まるなら、
+      // そちらを選びます（列を下げるぶんは ROW_PENALTY で割り引きます）。
+      // ただし席が窮屈なとき（相席あり）は、前から詰めることを優先します。
+      // 空きをまばらに残すと、大きなグループの置き場がなくなって泣き別れを招くためです。
+      var lookahead = sharing() ? 0 : ROW_LOOKAHEAD;
+      var overall = null;
+      var firstHit = -1;
       for (var ri = 0; ri < rows.length; ri++) {
+        if (firstHit >= 0 && ri - firstHit > lookahead) break;
         var r0 = rows[ri];
         if (opt.frontOnly && r0 > FRONT_ROWS) continue;
         if (opt.origin && r0 !== opt.origin.row) continue;
@@ -522,6 +577,7 @@
 
                 var score = WIDTH_PENALTY[w] + h * 0.4 + sh.waste * 0.6 + sh.cut * 0.15 +
                   aislePenalty(sh.seats, lastRow) +
+                  idealBonus(count, sh.seats) +
                   (opt.group ? genderHint(sh.seats, opt.group) : 0);
                 if (!best || score < best.score - 1e-9 ||
                     (Math.abs(score - best.score) < 1e-9 && c0 < best.c0)) {
@@ -534,9 +590,16 @@
             }
           }
         }
-        if (best) return best; // 見つかった列のなかでいちばん形のよいもの
+        if (best) {
+          if (firstHit < 0) firstHit = ri;
+          var adjusted = best.score + (ri - firstHit) * ROW_PENALTY;
+          if (!overall || adjusted < overall.adjusted - 1e-9) {
+            best.adjusted = adjusted;
+            overall = best;
+          }
+        }
       }
-      return null;
+      return overall;
     }
 
     /**
@@ -881,7 +944,8 @@
     var day = {
       startIndex: startIndex,
       frontStartIndex: frontStartIndex,
-      shifted: startIndex > 0 || frontStartIndex > 0,
+      reversed: !!opt.reversed,
+      shifted: startIndex > 0 || frontStartIndex > 0 || !!opt.reversed,
       sharing: sharing, // true = 席が窮屈なので相席もありうる
       placements: {},
       reserved: {},
@@ -897,6 +961,15 @@
     // 前席組は「前3列のなか」で、それ以外は「バス全体」で、日ごとに並べ始める位置をずらす。
     var frontGroups = rotate(groups.filter(function (g) { return g.frontOption; }), frontStartIndex);
     var restGroups = rotate(groups.filter(function (g) { return !g.frontOption; }), startIndex);
+
+    // 2日目以降の席替えは「前後の入れかえ」で行う。
+    // 前から順に置いていくので、並べる順番をひっくり返すと
+    // うしろにいた組が前へ、前にいた組がうしろへ、まん中の組はあまり動かない、となる。
+    // 前席をご希望の組は入れかえの対象外（2日目も前のまま）。
+    // 前席をご希望の組は、どの日も前3列にいるので入れかえの対象にしません。
+    // （前3列のなかでの並びは、日ごとに順ぐりにずらします）
+    if (opt.reversed) restGroups = restGroups.slice().reverse();
+
     var ordered = frontGroups.concat(restGroups);
 
     // 置く順番を指定されているときは、そちらを使う（分かれてしまった組を先に置き直すため）
@@ -989,6 +1062,7 @@
     var retry = assignDay(layout, groups, {
       startIndex: day.startIndex,
       frontStartIndex: day.frontStartIndex,
+      reversed: day.reversed,
       sharing: opt.sharing,
       orderOverride: order
     });
@@ -1023,11 +1097,37 @@
     return same / keys.length;
   }
 
+  /** その日、相席になったグループの一覧 */
+  function sharedGroupIds(day) {
+    var out = {};
+    (day.shared || []).forEach(function (sh) {
+      sh.groupIds.forEach(function (id) { out[id] = true; });
+    });
+    return Object.keys(out);
+  }
+
+  /**
+   * 相席の当番が、特定の組にかたよっていないか。小さいほど公平。
+   * 前の日までに相席になった回数を持ちまわして、同じ組が続けて相席にならないようにします
+   * （1日目に相席なしだった組から先に、2日目の相席をお願いする）。
+   */
+  var SHARE_FAIRNESS = 3; // 泣き別れ（100点）より軽く、男女の並び（5点）と同じくらいの重み
+
+  function shareFairnessPenalty(day, history) {
+    if (!history) return 0;
+    var penalty = 0;
+    sharedGroupIds(day).forEach(function (id) {
+      penalty += (history[id] || 0) * SHARE_FAIRNESS;
+    });
+    return penalty;
+  }
+
   function buildBestDay(layout, groups, opt, target, rotatingCount) {
     function make(startIndex) {
       var day = assignDay(layout, groups, {
         startIndex: startIndex,
         frontStartIndex: opt.frontStartIndex,
+        reversed: opt.reversed,
         sharing: opt.sharing
       });
       return repackSplits(layout, groups, opt, day);
@@ -1043,6 +1143,7 @@
       seenMaps.forEach(function (m) { sim = Math.max(sim, daySimilarity(mine, m)); });
       // 半分より多くの席がそのままなら、似ぐあいに応じて減点していく
       if (sim > 0.5) sc += (sim - 0.5) * 160;
+      sc += shareFairnessPenalty(day, opt.shareHistory);
       var dist = Math.min(
         Math.abs(startIndex - target),
         rotatingCount - Math.abs(startIndex - target)
@@ -1773,14 +1874,26 @@
     var frontRotating = groups.filter(function (g) { return g.frontOption; });
     var rotating = groups.filter(function (g) { return !g.frontOption; });
 
+    // 席替えのしかた。奇数日目（2日目・4日目…）は前後をひっくり返し、
+    // 2日ごとに並べ始める位置もずらしていきます。
+    //   2日ツアー … 1日目そのまま／2日目 前後反転
+    //   3日ツアー … ＋3日目は開始位置をずらす
+    //   4日ツアー … ＋4日目はずらしたうえで前後反転
     var days = [];
+    var shareHistory = {}; // グループごとの、これまでに相席になった日数
     for (var d = 0; d < dayCount; d++) {
+      var pairIndex = Math.floor(d / 2);
       var day = buildBestDay(layout, groups, {
         frontStartIndex: startIndexForDay(frontRotating, d, dayCount),
+        reversed: d % 2 === 1,
         sharing: sharing,
+        shareHistory: d > 0 ? shareHistory : null,
         previousSeatMaps: days.map(daySeatMap)
-      }, startIndexForDay(rotating, d, dayCount), rotating.length);
+      }, startIndexForDay(rotating, pairIndex, dayCount), rotating.length);
       day.dayIndex = d;
+      sharedGroupIds(day).forEach(function (id) {
+        shareHistory[id] = (shareHistory[id] || 0) + 1;
+      });
       // 自動で割り当てた直後の状態を「もともとの注意」として控えておく
       day.baselineIssues = inspectDay(layout, groups, day).map(issueKey);
       days.push(day);

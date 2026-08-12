@@ -121,9 +121,19 @@
 
       // お名前の欄は「お名前を出す」にしたときだけ出す（入力済みの値は消えません）
       if (state.useRealName) {
-        body.appendChild(fieldText('名字', g.surname, '例：山田', function (v) { g.surname = v; changed(); }));
+        body.appendChild(fieldText('名字（座席表に出ます）', g.surname, '例：山田',
+          function (v) { g.surname = v; changed(); }));
         if (labels[i].needsFullName || g.fullName) {
-          body.appendChild(fieldText('フルネーム', g.fullName, '例：山田太郎', function (v) { g.fullName = v; changed(); }));
+          // 同じ名字のお客様がいるときだけ出る欄。
+          // 何を入れる欄なのかが分かるよう、注意書きを欄のすぐ上に置く
+          if (labels[i].needsFullName) {
+            var note = el('p', 'help is-warn');
+            note.innerHTML = '<strong>同じ名字のお客様がいます。</strong>' +
+              '下の欄に<strong>名字と下の名前をつづけて</strong>入れると、座席表で区別できます。';
+            body.appendChild(note);
+          }
+          body.appendChild(fieldText('フルネーム（名字＋下の名前）', g.fullName, '例：山田太郎',
+            function (v) { g.fullName = v; changed(); }));
         }
       }
 
@@ -155,12 +165,6 @@
         mem.appendChild(chip);
       });
       li.appendChild(mem);
-
-      if (labels[i].needsFullName) {
-        var w = el('p', 'help');
-        w.innerHTML = '<strong>同じ名字のお客様がいます。</strong>フルネームを入れると区別できます。';
-        li.appendChild(w);
-      }
 
       list.appendChild(li);
     });

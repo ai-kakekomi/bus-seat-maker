@@ -285,16 +285,43 @@ test('各グループの席はひとつながりになる（斜めだけの接�
   });
 });
 
-test('3名グループはL字（2席＋となりの1席）で空席ゼロになる', function () {
+test('3名グループは通路をまたいだ横一列（■■｜■）になる', function () {
   var r = S.assign({ layoutType: '11x45', groups: [group('g1', 3)], days: 1 });
   var day = r.days[0];
   var bs = blocksOf(day, 'g1');
   eq(bs.length, 1, 'ブロック数');
   eq(bs[0].seatIds.length, 3, '枠に含まれる席数（空席を含めない）');
   eq(bs[0].people, 3, '枠の中の人数');
-  eq(bs[0].isRect, false, 'L字になっていない（四角のまま）');
-  ok(isConnected(bs[0].seatIds), 'L字がつながっていない');
+  eq(bs[0].row0, bs[0].row1, '同じ列に並んでいない（横一列でない）');
+  eq(bs[0].col1 - bs[0].col0 + 1, 3, '横幅3席になっていない');
+  ok(isConnected(bs[0].seatIds), 'つながっていない');
   eq(Object.keys(day.reserved).length, 0, '枠の中の取り置き空席');
+});
+
+// 人数ごとの理想のかたち（ゆみさん＝阪急交通社の現場回答にもとづく）
+//   4名 ＝ 片側に集めた正方形／5名 ＝ 正方形＋通路をまたいで1／6名 ＝ 横一列4＋2
+[[4, 2, 2], [5, 3, 2], [6, 4, 2]].forEach(function (c) {
+  var size = c[0], wantW = c[1], wantH = c[2];
+  test(size + '名グループは外わく' + wantW + '席×' + wantH + '列に収まる', function () {
+    var r = S.assign({ layoutType: '11x45', groups: [group('g1', size)], days: 1 });
+    var day = r.days[0];
+    var bs = blocksOf(day, 'g1');
+    eq(bs.length, 1, 'ブロック数');
+    eq(bs[0].people, size, '枠の中の人数');
+    eq(bs[0].col1 - bs[0].col0 + 1, wantW, '横幅');
+    eq(bs[0].row1 - bs[0].row0 + 1, wantH, '列数');
+    eq(Object.keys(day.reserved).length, 0, '枠の中の取り置き空席');
+  });
+});
+
+test('最後部列（5席横並び）は最終手段で、空きがあるうちは使わない', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 4), group('g2', 3)], days: 1 });
+  var day = r.days[0];
+  var lastRow = r.layout.lastRow;
+  var usedBack = Object.keys(day.placements).filter(function (id) {
+    return id.indexOf('r' + lastRow + '-') === 0;
+  });
+  eq(usedBack.length, 0, '空きがあるのに最後部列を使っている');
 });
 
 test('5名グループもL字で空席ゼロになる', function () {
@@ -786,46 +813,63 @@ function frontRow(day, id) {
   return Math.min.apply(null, day.seatsOfGroup[id].map(seatRow));
 }
 
-test('2日ツアーは半周ずらす（1日目の前方グループが後方に回る）', function () {
+test('2日ツアーは前後をひっくり返す（前の人はうしろへ、うしろの人は前へ）', function () {
   var groups = [];
   for (var i = 1; i <= 8; i++) groups.push(group('g' + i, 4)); // 計32名
-  eq(starts(groups, 2).join(','), '0,4', '並べ始めるグループ');
 
   var r = S.assign({ layoutType: '11x45', groups: groups, days: 2 });
+  eq(r.days[0].reversed, false, '1日目は反転しない');
+  eq(r.days[1].reversed, true, '2日目は反転する');
   ok(frontRow(r.days[1], 'g1') > frontRow(r.days[0], 'g1'), 'g1が後方に回っていない');
   ok(frontRow(r.days[1], 'g8') < frontRow(r.days[0], 'g8'), 'g8が前方に来ていない');
-  eq(r.days[1].groupOrder.join(','), 'g5,g6,g7,g8,g1,g2,g3,g4', '2日目の順序');
+  eq(r.days[1].groupOrder.join(','), 'g8,g7,g6,g5,g4,g3,g2,g1', '2日目の順序');
 });
 
-test('3日ツアーは3分の1ずつずらす（全員が前・中・後を1日ずつ）', function () {
+test('まん中のグループは、2日目もさほど動かない', function () {
   var groups = [];
   for (var i = 1; i <= 9; i++) groups.push(group('g' + i, 3)); // 計27名
-  eq(starts(groups, 3).join(','), '0,3,6', '並べ始めるグループ');
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 2 });
+  // 端の組は大きく動き、まん中（g5）はほとんど動かない
+  var move = function (id) {
+    return Math.abs(frontRow(r.days[1], id) - frontRow(r.days[0], id));
+  };
+  ok(move('g1') >= 4, 'g1（先頭）が動いていない: ' + move('g1'));
+  ok(move('g9') >= 4, 'g9（最後尾）が動いていない: ' + move('g9'));
+  ok(move('g5') <= 2, 'g5（まん中）が動きすぎ: ' + move('g5'));
+});
+
+test('3日ツアーは、3日目に並べ始める位置をずらす', function () {
+  var groups = [];
+  for (var i = 1; i <= 9; i++) groups.push(group('g' + i, 3)); // 計27名
 
   var r = S.assign({ layoutType: '11x45', groups: groups, days: 3 });
-  eq(r.days[1].groupOrder.join(','), 'g4,g5,g6,g7,g8,g9,g1,g2,g3', '2日目の順序');
-  eq(r.days[2].groupOrder.join(','), 'g7,g8,g9,g1,g2,g3,g4,g5,g6', '3日目の順序');
+  eq(r.days[1].groupOrder.join(','), 'g9,g8,g7,g6,g5,g4,g3,g2,g1', '2日目の順序（前後反転）');
+  eq(r.days[2].reversed, false, '3日目は反転しない');
+  ok(r.days[2].startIndex > 0, '3日目の開始位置がずれていない');
 
-  // g1 は 1日目に先頭、2日目にいちばん後ろ、3日目に真ん中あたり
-  eq(r.days[0].groupOrder.indexOf('g1'), 0, '1日目のg1の順番');
-  eq(r.days[1].groupOrder.indexOf('g1'), 6, '2日目のg1の順番');
-  eq(r.days[2].groupOrder.indexOf('g1'), 3, '3日目のg1の順番');
+  // 3日とも並びが違う
+  var seen = {};
+  r.days.forEach(function (d, i) {
+    var key = d.groupOrder.join(',');
+    ok(!seen[key], (i + 1) + '日目が' + seen[key] + '日目と同じ並び');
+    seen[key] = i + 1;
+  });
 
-  // どの日も、どのグループも一度は前方に来る
+  // どのグループも一度は前方に来る
   ['g1', 'g4', 'g7'].forEach(function (id) {
     var rows = r.days.map(function (d) { return frontRow(d, id); });
     ok(Math.min.apply(null, rows) <= 4, id + ' が一度も前方に来ない: ' + rows.join(','));
   });
 });
 
-test('4日ツアーは4分の1ずつずらす', function () {
+test('4日ツアーは「ずらす」と「前後反転」を組み合わせる', function () {
   var groups = [];
   for (var i = 1; i <= 8; i++) groups.push(group('g' + i, 4)); // 計32名
-  eq(starts(groups, 4).join(','), '0,2,4,6', '並べ始めるグループ');
 
   var r = S.assign({ layoutType: '11x45', groups: groups, days: 4 });
-  eq(r.days[2].groupOrder.join(','), 'g5,g6,g7,g8,g1,g2,g3,g4', '3日目の順序');
-  eq(r.days[3].groupOrder.join(','), 'g7,g8,g1,g2,g3,g4,g5,g6', '4日目の順序');
+  eq(r.days.map(function (d) { return d.reversed ? 'R' : '-'; }).join(''), '-R-R', '反転する日');
+  eq(r.days[2].groupOrder.join(','), 'g3,g4,g5,g6,g7,g8,g1,g2', '3日目の順序');
+  eq(r.days[3].groupOrder.join(','), 'g2,g1,g8,g7,g6,g5,g4,g3', '4日目の順序');
   // 1日目とまったく同じ並びになる日はない
   var seen = {};
   r.days.forEach(function (d, i) {
@@ -835,12 +879,10 @@ test('4日ツアーは4分の1ずつずらす', function () {
   });
 });
 
-test('人数がばらばらでもグループは切らずに、人数の割合でずらす', function () {
-  // 5,1,4,2,3,1 の計16名。半分（8名）に達する最初の切れ目は3組目（a+b+c=10名）のあと
+test('人数がばらばらでもグループは切らずに前後反転する', function () {
   var groups = [group('a', 5), group('b', 1), group('c', 4), group('d', 2), group('e', 3), group('f', 1)];
-  eq(starts(groups, 2).join(','), '0,3', '並べ始めるグループ');
   var r = S.assign({ layoutType: '11x45', groups: groups, days: 2 });
-  eq(r.days[1].groupOrder.join(','), 'd,e,f,a,b,c', '2日目の順序');
+  eq(r.days[1].groupOrder.join(','), 'f,e,d,c,b,a', '2日目の順序');
   // グループが分断されていないこと
   r.days.forEach(function (day, di) {
     groups.forEach(function (g) {
@@ -849,7 +891,13 @@ test('人数がばらばらでもグループは切らずに、人数の割合�
   });
 });
 
-test('前席オプション組も、前3列のなかで日ごとに巡回する', function () {
+test('人数の割合で並べ始める位置を決める（グループは切らない）', function () {
+  // 5,1,4,2,3,1 の計16名。半分（8名）に達する最初の切れ目は3組目（a+b+c=10名）のあと
+  var groups = [group('a', 5), group('b', 1), group('c', 4), group('d', 2), group('e', 3), group('f', 1)];
+  eq(starts(groups, 2).join(','), '0,3', '並べ始めるグループ');
+});
+
+test('前席オプション組は入れかえの対象外。前3列のなかで日ごとに順ぐりに動く', function () {
   var groups = [
     group('f1', 2, { frontOption: true }),
     group('f2', 2, { frontOption: true }),
@@ -1035,6 +1083,29 @@ test('同じ並びを避けることより、離れ離れにしないことを�
         (di + 1) + '日目に分割の警告がない');
     }
   });
+});
+
+test('相席の当番は日ごとに回る（1日目に相席なしだった組が2日目に相席になる）', function () {
+  // 席が窮屈で、相席が避けられない構成
+  var sizes = [1, 1, 1, 3, 3, 3, 5, 5, 5, 3, 3, 1, 1, 3, 3]; // 計41名
+  var groups = sizes.map(function (n, i) { return group('g' + i, n); });
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 2 });
+  eq(r.sharing, true, '相席ありの構成になっていない');
+
+  function sharedIds(day) {
+    var out = {};
+    (day.shared || []).forEach(function (sh) {
+      sh.groupIds.forEach(function (id) { out[id] = true; });
+    });
+    return out;
+  }
+  var d1 = sharedIds(r.days[0]);
+  var d2 = sharedIds(r.days[1]);
+
+  var restedThenShared = r.groups.filter(function (g) { return !d1[g.id] && d2[g.id]; });
+  ok(restedThenShared.length > 0, '1日目に相席なしだった組が、2日目も全員そのまま');
+  ok(Object.keys(d1).sort().join(',') !== Object.keys(d2).sort().join(','),
+    '相席の顔ぶれが1日目と2日目でまったく同じ');
 });
 
 test('日ごとの並びは「似ぐあい」で見る（1人動かしただけでは別物にしない）', function () {

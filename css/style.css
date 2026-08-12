@@ -106,6 +106,12 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 .field .help { font-weight: 400; }
 
 .help { font-size: .88rem; color: var(--fg-muted); }
+/* 同じ名字のお客様がいるときの案内。フルネーム欄のすぐ上に出す */
+.help.is-warn {
+  color: var(--warn); background: var(--warn-bg);
+  border: 1px solid var(--warn); border-radius: 8px;
+  padding: .5rem .7rem; margin: 0;
+}
 
 .btn {
   font: inherit; font-weight: 700; cursor: pointer;
