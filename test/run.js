@@ -371,6 +371,7 @@ test('ほぼ満席の見本でも、かたちが崩れる組はごくわずか�
   // 画面の見本「ほぼ満席」と同じ構成。
   // 満席でもかたちをそろえるために席をずらすようにした結果、
   // 崩れる組は 5組 → 2組 に減りました。ここが増えたら作り直しの合図です
+  // （申し込み順で詰め切れないときは、大きい組から置く並べ方も試します）
   var base = [
     group('A', 2, { frontOption: true }), group('B', 2, { frontOption: true }),
     group('C', 3, { frontOption: true }), group('D', 4, { frontOption: true }),
@@ -393,6 +394,22 @@ test('ほぼ満席の見本でも、かたちが崩れる組はごくわずか�
       S.nonIdealGroups(r.groups, r.days[0]).map(function (g) { return g.id; }).join(',') + '）');
     eq(splitGroupCount(r.days[0]), 0, label + '：分かれた組がある');
   });
+});
+
+test('最後部列にぴったり収まった組を「崩れている」と言わない', function () {
+  // 満席43名。5名の組が1つだけなので、最後部（5席）はその組が埋める。
+  // 5席横並びは最後部列の自然なかたちなので、お知らせの対象にしない
+  var groups = [group('X', 5)];
+  for (var i = 0; i < 19; i++) groups.push(group('p' + i, 2));
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  var day = r.days[0];
+
+  var backRow = day.seatsOfGroup['X'].every(function (id) {
+    return seatRow(id) === r.layout.lastRow;
+  });
+  ok(backRow, '5名の組が最後部列にいない');
+  eq(S.nonIdealGroups(r.groups, day).filter(function (g) { return g.id === 'X'; }).length, 0,
+    '最後部列の組が「かたちが崩れている」扱いになっている');
 });
 
 test('本来のかたちに収まらなかった組は、座席表の下でお知らせする', function () {
