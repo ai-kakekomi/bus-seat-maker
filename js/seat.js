@@ -318,6 +318,29 @@
   var ROW_PENALTY = 1.0; // 1列うしろにずらすことへの減点（IDEAL_BONUS より小さくしてある）
   var WINDOW_PENALTY = 0.3; // おひとり様が窓側でないことへの減点（列の前後より弱くしてある）
 
+  var WINDOW_ANCHOR = 0.5; // 窓側を空けて通路側に寄ることへの減点
+
+  /**
+   * 窓側を空けたまま通路側に寄っていないか。
+   * 左の2席なら col1（左窓）から、右の2席なら col4（右窓）から埋めるのが自然です。
+   * 列ごとに見て、通路側だけを使っている列があれば減点します。
+   * （相席のときは、となりを別のグループが埋めるので「減点」どまりにしてあります）
+   */
+  function aisleSidePenalty(cells, lastRow) {
+    var byRow = {};
+    cells.forEach(function (c) {
+      if (c.row === lastRow) return; // 最後部列は5席が地つづきで、窓側の考え方が違う
+      (byRow[c.row] = byRow[c.row] || {})[c.col] = true;
+    });
+    var penalty = 0;
+    Object.keys(byRow).forEach(function (r) {
+      var cols = byRow[r];
+      if (cols[2] && !cols[1]) penalty += WINDOW_ANCHOR;
+      if (cols[3] && !cols[4]) penalty += WINDOW_ANCHOR;
+    });
+    return penalty;
+  }
+
   /**
    * お2人のグループが、通路をはさんで分かれていないか。
    *
@@ -701,7 +724,7 @@
       // そちらを選びます（列を下げるぶんは ROW_PENALTY で割り引きます）。
       // ただし席が窮屈なとき（相席あり）は、前から詰めることを優先します。
       // 空きをまばらに残すと、大きなグループの置き場がなくなって泣き別れを招くためです。
-      var lookahead = (sharing() || opt.backward) ? 0 : ROW_LOOKAHEAD;
+      var lookahead = sharing() ? 0 : ROW_LOOKAHEAD;
       var overall = null;
       var firstHit = -1;
       for (var ri = 0; ri < rows.length; ri++) {
@@ -732,15 +755,20 @@
               if (opt.origin && c0 !== opt.origin.col) continue;
               var full = rectSeats(r0, c0, w, h);
               if (!full) continue;
+              // 業務席は「はじめから無い席」として、四角から取り除いて考えます。
+              // こうしないと、最前列の2席とその次の列をひとまとめにした形
+              //（6名なら 前に2席＋次の列に4席）が作れません。
+              var forced = {};
               var busy = false;
               for (var i = 0; i < full.length; i++) {
+                if (full[i].isCrew) { forced[Math.floor(i / w) + ',' + (i % w)] = true; continue; }
                 if (taken(full[i], opt.ignoreBlocked)) { busy = true; break; }
               }
               if (busy) continue;
 
               // 候補の形（そのままの四角／角を欠けさせたL字）
               var shapes = shapeCandidates(full, w, h, count, allowPad,
-                opt.allowDeep || opt.allowAnyShape, depthLimit);
+                opt.allowDeep || opt.allowAnyShape, depthLimit, forced);
               for (var si = 0; si < shapes.length; si++) {
                 var sh = shapes[si];
                 // お2人が通路で分かれる形は、どんなに混んでいても作らない
@@ -753,6 +781,7 @@
                   aislePenalty(sh.seats, lastRow) +
                   idealBonus(count, sh.seats) +
                   windowPenalty(count, sh.seats, lastRow) +
+                  aisleSidePenalty(sh.seats, lastRow) +
                   (opt.group ? genderHint(sh.seats, opt.group) : 0);
                 if (!best || score < best.score - 1e-9 ||
                     (Math.abs(score - best.score) < 1e-9 && c0 < best.c0)) {
@@ -783,16 +812,46 @@
      * ・角を1〜2席ぶん欠けさせたL字（空席が出ない）
      * 欠けさせたあとも、前後左右でひとつながりであることを確かめます。
      */
-    function shapeCandidates(full, w, h, count, allowPad, deepOk, depthLimit) {
+    function shapeCandidates(full, w, h, count, allowPad, deepOk, depthLimit, forced) {
+      forced = forced || {};
       var out = [];
-      var area = full.length;
+
+      // 業務席を除いた、実際に使える席
+      var avail = [];
+      for (var ai = 0; ai < h; ai++) {
+        for (var aj = 0; aj < w; aj++) {
+          if (!forced[ai + ',' + aj]) avail.push({ i: ai, j: aj, seat: full[ai * w + aj] });
+        }
+      }
+      var area = avail.length;
       var waste = area - count;
+      if (waste < 0) return out;
+
+      // 候補として認めてよい形か。
+      // 「その四角のいちばん前の列を使っていること」も条件にします。
+      // 使っていないと、前の列を空けたまま後ろに置いたのと同じことになるためです。
+      function usesFirstRow(cells) {
+        for (var k = 0; k < cells.length; k++) if (cells[k].i === 0) return true;
+        return false;
+      }
+      function accept(kept) {
+        if (kept.length !== count) return false;
+        if (!usesFirstRow(kept)) return false;
+        if (!isConnectedCells(kept)) return false;
+        if (!deepOk && !cellsAllowed(kept, false, depthLimit)) return false;
+        return true;
+      }
 
       if (waste === 0) {
-        out.push({ seats: full, cut: 0, waste: 0 });
+        if (accept(avail)) {
+          out.push({ seats: avail.map(function (a) { return a.seat; }), cut: 0, waste: 0 });
+        }
         return out;
       }
-      if (allowPad) out.push({ seats: full, cut: 0, waste: waste });
+      // 取り置き空席つきの枠（人数より大きい枠を、そのままこの組のために確保する）
+      if (allowPad && usesFirstRow(avail) && isConnectedCells(avail)) {
+        out.push({ seats: avail.map(function (a) { return a.seat; }), cut: 0, waste: waste });
+      }
       if (waste >= w) return out; // 1列ぶん以上あまるなら、そもそも四角が大きすぎる
 
       var patternList = [];
@@ -824,19 +883,16 @@
       var seen = {};
       patternList.forEach(function (cells) {
         var drop = {};
-        cells.forEach(function (c) { drop[c[0] + ',' + c[1]] = true; });
+        var hitsCrew = false;
+        cells.forEach(function (c) {
+          if (forced[c[0] + ',' + c[1]]) hitsCrew = true;
+          drop[c[0] + ',' + c[1]] = true;
+        });
+        if (hitsCrew) return; // 業務席はもともと数に入っていないので、落とす対象にしない
         if (Object.keys(drop).length !== waste) return;
 
-        var kept = [];
-        for (var i = 0; i < h; i++) {
-          for (var j = 0; j < w; j++) {
-            if (!drop[i + ',' + j]) kept.push({ i: i, j: j, seat: full[i * w + j] });
-          }
-        }
-        if (kept.length !== count) return;
-        if (!isConnectedCells(kept)) return;
-        // 欠けさせた結果が縦長になっていないか
-        if (!deepOk && !cellsAllowed(kept, false, depthLimit)) return;
+        var kept = avail.filter(function (a) { return !drop[a.i + ',' + a.j]; });
+        if (!accept(kept)) return;
 
         var key = kept.map(function (k) { return k.seat.id; }).join('|');
         if (seen[key]) return;
@@ -882,8 +938,6 @@
     function rowOrder(opt) {
       var all = [];
       for (var r = 1; r <= lastRow; r++) all.push(r);
-      // 後方のお席をご希望の組は、うしろの列から順に見ていきます
-      if (opt.backward) return all.slice().reverse();
       if (!opt.fromRow || opt.fromRow <= 1) return all;
       var k = Math.min(opt.fromRow, lastRow) - 1;
       return all.slice(k).concat(all.slice(0, k));
@@ -935,10 +989,7 @@
       while (placedCount < g.size && guard++ < 60) {
         var left = g.size - placedCount;
         var rest = g.members.slice(placedCount);
-        var base = {
-          groupId: g.id, group: g, members: rest,
-          fromRow: opt.fromRow, backward: !!g.rearOption
-        };
+        var base = { groupId: g.id, group: g, members: rest, fromRow: opt.fromRow };
         var pick = null;
 
         if (opt.origin && placedCount === 0) {
@@ -1168,8 +1219,6 @@
     var restGroups = rotate(groups.filter(function (g) {
       return !g.frontOption && !g.rearOption;
     }), startIndex);
-    // 後方をご希望の組（大人数でにぎやかなど）は、いちばん最後に置く。
-    // 前から詰めていくので、結果としてうしろのほうに集まります。
     var rearGroups = groups.filter(function (g) { return g.rearOption; });
 
     // 2日目以降の席替えは「前後の入れかえ」で行う。
@@ -1180,9 +1229,11 @@
     // （前3列のなかでの並びは、日ごとに順ぐりにずらします）
     if (opt.reversed) restGroups = restGroups.slice().reverse();
 
-    // 後方をご希望の組は先に置きます。あとから置くと、前詰めのお客様に
-    // うしろまで埋められてしまい、まん中に押し出されてしまうためです。
-    var ordered = frontGroups.concat(rearGroups).concat(restGroups);
+    // 後方をご希望の組は、いちばん最後に置きます。前から詰めていくので、
+    // 結果としてほかのお客様のうしろになります。
+    // 席がゆったりしているときに、わざわざ最後部まで飛ばすことはしません
+    //（ぽつんと離れて座ると、かえって目立つためです）。
+    var ordered = frontGroups.concat(restGroups).concat(rearGroups);
 
     // 置く順番を指定されているときは、そちらを使う（分かれてしまった組を先に置き直すため）
     if (opt.orderOverride) {
@@ -1195,8 +1246,8 @@
       });
       // 前席オプションの組は、やはり先に置く（前3列を確保するため）
       ordered = ordered.filter(function (g) { return g.frontOption; })
-        .concat(ordered.filter(function (g) { return g.rearOption; }))
-        .concat(ordered.filter(function (g) { return !g.frontOption && !g.rearOption; }));
+        .concat(ordered.filter(function (g) { return !g.frontOption && !g.rearOption; }))
+        .concat(ordered.filter(function (g) { return g.rearOption; }));
     }
     day.groupOrder = ordered.map(function (g) { return g.id; });
 
@@ -1344,6 +1395,7 @@
   var REAR_STAY_PENALTY = 8; // 2日つづけて後方に座ってしまったグループ1組ぶんの減点
   var REVERSE_MISS = 4;      // 前後反転をあきらめることへの減点
   var REAR_ROWS = 2;         // うしろから何列ぶんを「後方」とみなすか
+  var START_DRIFT = 1;       // 目標の開始位置から1組ぶんずれることへの減点
 
   /** そのグループが座っている、いちばん前の列 */
   function frontRowOf(day, groupId) {
@@ -1441,7 +1493,10 @@
         Math.abs(startIndex - target),
         rotatingCount - Math.abs(startIndex - target)
       );
-      return sc + dist * 0.01; // 同じ出来ばえなら、目標に近い開始位置を選ぶ
+      // 目標の開始位置からずれること自体が分かりにくさなので、それなりの重みを付けます。
+      // 「かたちが少し整う」程度の理由で申し込み順をずらさないための重みです
+      //（泣き別れ ×100 や、連日後方 ×8 のほうがずっと重いので、そちらは優先されます）
+      return sc + dist * START_DRIFT;
     }
 
     var best = make(target, !!opt.reversed);
