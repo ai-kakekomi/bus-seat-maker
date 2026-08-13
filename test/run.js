@@ -1188,6 +1188,38 @@ test('相席の当番は日ごとに回る（1日目に相席なしだった組�
     '相席の顔ぶれが1日目と2日目でまったく同じ');
 });
 
+test('2日つづけて後方に座らされる組は出ない（ほぼ満席の見本と同じ構成）', function () {
+  // 画面の見本「ほぼ満席」と同じ 14組42名（43席／空席1）。
+  // ここで 5名・6名の組が最後部に居座ってしまう不具合があった
+  var groups = [
+    group('A', 2, { frontOption: true }), group('B', 2, { frontOption: true }),
+    group('C', 3, { frontOption: true }), group('D', 4, { frontOption: true }),
+    group('E', 4), group('F', 3), group('G', 5), group('H', 1), group('I', 2),
+    group('J', 3), group('K', 1), group('L', 6), group('M', 1), group('N', 5)
+  ];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 3 });
+  eq(r.totalPeople, 42, '人数');
+
+  var rearFrom = r.layout.lastRow - 1; // うしろ2列を「後方」とみなす
+  function frontRowOf(day, id) {
+    return Math.min.apply(null, day.seatsOfGroup[id].map(seatRow));
+  }
+  for (var d = 1; d < r.days.length; d++) {
+    var stuck = r.groups.filter(function (g) {
+      if (g.frontOption) return false;
+      return frontRowOf(r.days[d - 1], g.id) >= rearFrom &&
+             frontRowOf(r.days[d], g.id) >= rearFrom;
+    }).map(function (g) { return g.id; });
+    eq(stuck.join(','), '', d + '日目と' + (d + 1) + '日目で後方に居座った組');
+  }
+
+  // 席替えとして成立していること（分かれた組も出ないこと）
+  r.days.forEach(function (day, di) {
+    eq(Object.keys(day.placements).length, 42, (di + 1) + '日目の着席');
+    eq(splitGroupCount(day), 0, (di + 1) + '日目で分かれた組がある');
+  });
+});
+
 test('日ごとの並びは「似ぐあい」で見る（1人動かしただけでは別物にしない）', function () {
   var r = S.assign({ layoutType: '11x45', groups: fullHouseGroups(), days: 3 });
   var maps = r.days.map(S.daySeatMap);
