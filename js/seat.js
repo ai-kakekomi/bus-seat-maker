@@ -262,8 +262,8 @@
    *
    *   1名  ■          2名  ■■          3名  ■■｜■     （通路をまたいだ横一列）
    *
-   *   4名  ■■        5名  ■■｜■      6名  ■■｜■■
-   *        ■■             ■■｜□           ■■｜□□
+   *   4名  ■■｜■■  5名  ■■｜■      6名  ■■｜■■
+   *                         ■■｜□           ■■｜□□
    *
    *   7名  ■■｜■■    8名  ■■｜■■
    *        □■｜■■         ■■｜■■
@@ -276,7 +276,7 @@
     1: { w: 1, h: 1 },
     2: { w: 2, h: 1 },
     3: { w: 3, h: 1 },
-    4: { w: 2, h: 2 },
+    4: { w: 4, h: 1 },
     5: { w: 3, h: 2 },
     6: { w: 4, h: 2 }
   };
@@ -316,6 +316,25 @@
   var WINDOW_PENALTY = 0.3; // おひとり様が窓側でないことへの減点（列の前後より弱くしてある）
 
   /**
+   * お2人のグループが、通路をはさんで分かれていないか。
+   *
+   * 通常列の2人掛けは「col1とcol2」「col3とcol4」の組です。
+   * col2とcol3は画面ではとなり合って見えますが、あいだに通路があるので
+   * <strong>並んで座っていることになりません</strong>。お2人にとっては泣き別れです。
+   * （最後部列は5席が地つづきなので、この決まりは効きません）
+   *
+   * @returns {boolean} 通路で分かれていれば true
+   */
+  function splitByAisle(cells, lastRow) {
+    if (cells.length !== 2) return false;
+    var a = cells[0], b = cells[1];
+    if (a.row !== b.row) return false;
+    if (a.row === lastRow) return false; // 最後部列に通路はない
+    var lo = Math.min(a.col, b.col);
+    return lo === 2; // col2 と col3 の組み合わせだけが、通路をまたいだ形
+  }
+
+  /**
    * おひとり様は窓側が自然なので、通路側だと軽く減点します。
    * 同じ列のなかでの選び分けにだけ効く強さにしてあり、
    * これが理由でうしろの列に回ることはありません。
@@ -335,7 +354,7 @@
     1: '1席',
     2: '横に2席',
     3: '通路をまたいだ横一列（■■｜■）',
-    4: '片側に集めた正方形（■■／■■）',
+    4: '通路をまたいだ横一列（■■｜■■）',
     5: '正方形＋通路をまたいで1席（■■｜■／■■）',
     6: '横一列4席＋2席（■■｜■■／■■）'
   };
@@ -372,6 +391,9 @@
       if (!want) return false;
       var b = box[g.id];
       if (b.people !== g.size) return false; // 取り置き空席つきの枠は別の話
+      // 最前列は運転席側の2席が業務席なので、お客様が座れるのは2席だけ。
+      // ここにかかるグループは、そもそも理想のかたちを作れないので数えません
+      if (b.row0 <= CREW_ROW) return false;
       return (b.col1 - b.col0 + 1) !== want.w || (b.row1 - b.row0 + 1) !== want.h;
     });
   }
@@ -681,6 +703,9 @@
       var firstHit = -1;
       for (var ri = 0; ri < rows.length; ri++) {
         if (firstHit >= 0 && ri - firstHit > lookahead) break;
+        // まだ誰も座っていない列を飛ばしてまで、形を整えることはしない。
+        // 前の列を丸ごと空けてしまうと、いちばん良い席が遊んでしまうため
+        if (firstHit >= 0 && ri > firstHit && isEmptyRow(rows[ri - 1])) break;
         var r0 = rows[ri];
         if (opt.frontOnly && r0 > FRONT_ROWS) continue;
         if (opt.origin && r0 !== opt.origin.row) continue;
@@ -715,6 +740,8 @@
                 opt.allowDeep || opt.allowAnyShape, depthLimit);
               for (var si = 0; si < shapes.length; si++) {
                 var sh = shapes[si];
+                // お2人が通路で分かれる形は、どんなに混んでいても作らない
+                if (splitByAisle(sh.seats, lastRow)) continue;
                 if (!opt.allowAnyShape && !mergedShapeOk(sh.seats, opt.groupId, opt.allowDeep)) continue;
                 var planned = planMembers(sh.seats, opt.members, count, opt.groupId);
                 if (!planned) continue;
@@ -839,6 +866,16 @@
     }
 
     // 探す列の順番。ふつうは前から。移動のときは指定の列から後ろへ、なければ前へ戻る。
+    /** その列に、まだ誰も座っていないか（業務席はもともと数えません） */
+    function isEmptyRow(row) {
+      var empty = true;
+      layout.seats.forEach(function (s6) {
+        if (s6.row !== row || s6.isCrew) return;
+        if (day.placements[s6.id] || day.reserved[s6.id]) empty = false;
+      });
+      return empty;
+    }
+
     function rowOrder(opt) {
       var all = [];
       for (var r = 1; r <= lastRow; r++) all.push(r);
