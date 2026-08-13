@@ -106,11 +106,33 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 .field .help { font-weight: 400; }
 
 .help { font-size: .88rem; color: var(--fg-muted); }
-/* 同じ名字のお客様がいるときの案内。フルネーム欄のすぐ上に出す */
+/* 同じ名字のお客様がいるときの案内。下のお名前の欄のすぐ上に出す */
 .help.is-warn {
   color: var(--warn); background: var(--warn-bg);
   border: 1px solid var(--warn); border-radius: 8px;
   padding: .5rem .7rem; margin: 0;
+}
+.help.is-warn p { margin: 0; }
+/* 同じ名字の相手の組へ飛ぶボタン */
+.same-surname-links {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: .4rem; margin-top: .5rem !important;
+}
+/* マニュアルの「理想のかたち」の小さな座席図。
+   文字（■）で描くとフォント差で崩れるため、四角そのものを並べる */
+.mini-bus { display: inline-flex; flex-direction: column; gap: 3px; vertical-align: middle; }
+.mini-row { display: flex; gap: 3px; }
+.mini-seat {
+  width: 15px; height: 15px; border-radius: 3px;
+  border: 1px solid var(--line); background: var(--card);
+}
+.mini-seat.is-on { border-color: var(--accent); background: var(--accent); }
+.mini-aisle { width: 9px; }
+
+/* 飛んだ先を、少しのあいだ光らせて分かるようにする */
+.group-item.is-highlight {
+  outline: 3px solid var(--warn); outline-offset: 2px;
+  transition: outline-color .4s;
 }
 
 .btn {

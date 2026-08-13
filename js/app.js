@@ -73,9 +73,23 @@
       return {
         id: g.id || newId(), size: size, members: members,
         frontOption: !!g.frontOption,
-        surname: g.surname || '', fullName: g.fullName || ''
+        surname: g.surname || '', givenName: givenNameOf(g)
       };
     });
+  }
+
+  /**
+   * 下のお名前を取り出す。
+   * 以前は「フルネーム（山田太郎）」を入れる欄だったので、
+   * 保存済みの古いデータからは名字を取り除いて下のお名前だけにする。
+   */
+  function givenNameOf(g) {
+    if (g.givenName) return g.givenName;
+    var full = (g.fullName || '').trim();
+    var surname = (g.surname || '').trim();
+    if (!full) return '';
+    if (surname && full.indexOf(surname) === 0) return full.slice(surname.length).trim();
+    return full;
   }
 
   /* ---------------- グループ ---------------- */
@@ -84,7 +98,7 @@
     var n = size || 2;
     var members = [];
     for (var i = 0; i < n; i++) members.push({ gender: 'unknown' });
-    state.groups.push({ id: newId(), size: n, members: members, frontOption: false, surname: '', fullName: '' });
+    state.groups.push({ id: newId(), size: n, members: members, frontOption: false, surname: '', givenName: '' });
   }
 
   function setSize(g, n) {
@@ -92,6 +106,47 @@
     while (g.members.length < n) g.members.push({ gender: 'unknown' });
     g.members.length = n;
     g.size = n;
+  }
+
+  /**
+   * 「同じ名字のお客様がいます」の案内。
+   * 相手のグループへ飛べるボタンを付ける（どの組と紛らわしいのかを、その場で確かめられるように）。
+   */
+  function sameSurnameNote(labels, i) {
+    var me = labels[i];
+    var box = el('div', 'help is-warn');
+    var p = el('p', null);
+    p.innerHTML = '<strong>同じ名字のお客様がいます。</strong>' +
+      '下のお名前を入れると、座席表では「' + me.label.replace(/様$/, '') +
+      '＋下のお名前＋様」で区別できます。';
+    box.appendChild(p);
+
+    var others = me.sameSurnameGroupIds || [];
+    if (others.length) {
+      var row = el('p', 'same-surname-links');
+      row.appendChild(el('span', null, '同じ名字の組：'));
+      others.forEach(function (id) {
+        var idx = -1;
+        state.groups.forEach(function (g, k) { if (g.id === id) idx = k; });
+        if (idx < 0) return;
+        row.appendChild(miniBtn(labels[idx].mark + '組', function () { focusGroup(id); }));
+      });
+      box.appendChild(row);
+    }
+    return box;
+  }
+
+  /** 指定したグループの入力欄までスクロールして、下のお名前の欄にカーソルを置く */
+  function focusGroup(groupId) {
+    var li = document.getElementById('group-' + groupId);
+    if (!li) return;
+    li.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    li.classList.add('is-highlight');
+    setTimeout(function () { li.classList.remove('is-highlight'); }, 1600);
+    var inputs = li.querySelectorAll('input[type="text"]');
+    // 下のお名前の欄（2つめのテキスト欄）があればそこ、なければ名字の欄
+    var target = inputs.length > 1 ? inputs[1] : inputs[0];
+    if (target) target.focus();
   }
 
   function renderGroups() {
@@ -102,6 +157,7 @@
     state.groups.forEach(function (g, i) {
       var colorIdx = result && result.colors ? result.colors[g.id] : null;
       var li = el('li', 'group-item' + (colorIdx != null ? ' color-' + colorIdx : ''));
+      li.id = 'group-' + g.id; // 同じ名字のグループへ行き来するための目印
 
       var head = el('div', 'group-head');
       var l = labels[i];
@@ -123,17 +179,14 @@
       if (state.useRealName) {
         body.appendChild(fieldText('名字（座席表に出ます）', g.surname, '例：山田',
           function (v) { g.surname = v; changed(); }));
-        if (labels[i].needsFullName || g.fullName) {
+        if (labels[i].duplicatedSurname || g.givenName) {
           // 同じ名字のお客様がいるときだけ出る欄。
           // 何を入れる欄なのかが分かるよう、注意書きを欄のすぐ上に置く
-          if (labels[i].needsFullName) {
-            var note = el('p', 'help is-warn');
-            note.innerHTML = '<strong>同じ名字のお客様がいます。</strong>' +
-              '下の欄に<strong>名字と下の名前をつづけて</strong>入れると、座席表で区別できます。';
-            body.appendChild(note);
+          if (labels[i].needsGivenName) {
+            body.appendChild(sameSurnameNote(labels, i));
           }
-          body.appendChild(fieldText('フルネーム（名字＋下の名前）', g.fullName, '例：山田太郎',
-            function (v) { g.fullName = v; changed(); }));
+          body.appendChild(fieldText('下のお名前', g.givenName, '例：太郎',
+            function (v) { g.givenName = v; changed(); }));
         }
       }
 
@@ -274,7 +327,7 @@
 
     // 同姓のお知らせ（全体の話）
     var labels = S.resolveLabels(state.groups, { useRealName: state.useRealName });
-    if (state.useRealName && labels.some(function (l) { return l.needsFullName; })) {
+    if (state.useRealName && labels.some(function (l) { return l.needsGivenName; })) {
       var ul = el('ul', 'msg-list');
       ul.appendChild(el('li', '', '同じ名字のお客様がいます。フルネームを入れると座席表で区別できます。'));
       box.appendChild(ul);
@@ -603,7 +656,7 @@
     return {
       id: newId(), size: size,
       members: genders.map(function (x) { return { gender: x }; }),
-      frontOption: !!opt.front, surname: opt.surname || '', fullName: opt.fullName || ''
+      frontOption: !!opt.front, surname: opt.surname || '', givenName: opt.givenName || ''
     };
   }
 
@@ -634,7 +687,8 @@
           g(5, ['male', 'male', 'male', 'female', 'female'], { surname: '田中' }),
           g(1, ['male'], { surname: '伊藤' }),
           g(2, ['male', 'female'], { surname: '高橋' }),
-          g(3, ['female', 'female', 'female'], { surname: '中村' }),
+          // 同姓だが下のお名前が未入力（実名表示にすると注意と行き来ボタンが出ます）
+          g(3, ['female', 'female', 'female'], { surname: '鈴木' }),
           g(1, ['female'], { surname: '斎藤' }),
           g(6, ['male', 'male', 'female', 'female', 'female', 'male'], { surname: '松本' }),
           g(1, ['male'], { surname: '井上' }),
@@ -651,8 +705,9 @@
       useRealName: false,
       groups: [
         g(2, ['male', 'female'], { surname: '山田', front: true }),
-        g(4, ['male', 'female', 'female', 'female'], { surname: '佐藤' }),
-        g(1, ['female'], { surname: '佐藤' }),
+        // 同姓のお客様（下のお名前が入っているので、実名表示にすると自動で区別されます）
+        g(4, ['male', 'female', 'female', 'female'], { surname: '佐藤', givenName: '太郎' }),
+        g(1, ['female'], { surname: '佐藤', givenName: '花子' }),
         g(3, ['male', 'male', 'female'], { surname: '鈴木' }),
         g(2, ['female', 'female'], { surname: '高橋' }),
         g(5, ['male', 'male', 'male', 'female', 'female'], { surname: '田中' }),
