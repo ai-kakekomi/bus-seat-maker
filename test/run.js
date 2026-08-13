@@ -1266,6 +1266,23 @@ test('人数の割合で並べ始める位置を決める（グループは切�
   eq(starts(groups, 2).join(','), '0,3', '並べ始めるグループ');
 });
 
+test('前席オプションが2組・2日ツアーでも、2日目は前後が入れかわる', function () {
+  // 見本「空席が多いとき」と同じ形。ずらす量を日ごとにすると、
+  // 2組のときは「1つずらして反転」で1日目と同じ並びに戻ってしまう
+  var groups = [
+    group('f1', 2, { frontOption: true }),
+    group('g1', 4), group('g2', 3), group('g3', 5),
+    group('f2', 2, { frontOption: true })
+  ];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 2 });
+  eq(r.days[0].groupOrder.slice(0, 2).join(','), 'f1,f2', '1日目の前席組');
+  eq(r.days[1].groupOrder.slice(0, 2).join(','), 'f2,f1', '2日目に前席組の順番が変わっていない');
+
+  var d1 = Math.min.apply(null, r.days[0].seatsOfGroup['f1'].map(seatRow));
+  var d2 = Math.min.apply(null, r.days[1].seatsOfGroup['f1'].map(seatRow));
+  ok(d1 !== d2, 'f1が2日つづけて同じ列にいる（' + d1 + '列目）');
+});
+
 test('前席オプション組も、2日目は逆順になる（同じ組が毎日いちばん前にならない）', function () {
   var groups = [
     group('f1', 2, { frontOption: true }),
@@ -1277,8 +1294,12 @@ test('前席オプション組も、2日目は逆順になる（同じ組が毎�
 
   // 日ごとに前席組の並び順が変わる
   eq(r.days[0].groupOrder.slice(0, 3).join(','), 'f1,f2,f3', '1日目の前席組');
-  eq(r.days[1].groupOrder.slice(0, 3).join(','), 'f1,f3,f2', '2日目の前席組（順ぐりのうえ逆順）');
-  eq(r.days[2].groupOrder.slice(0, 3).join(','), 'f3,f1,f2', '3日目の前席組');
+  eq(r.days[1].groupOrder.slice(0, 3).join(','), 'f3,f2,f1', '2日目の前席組（逆順）');
+  eq(r.days[2].groupOrder.slice(0, 3).join(','), 'f2,f3,f1', '3日目の前席組（順ぐり）');
+  // どの日も先頭の組が違う（ずらす周期は2日ごと。日ごとにずらすと前後反転と
+  // 打ち消し合って、前席組が2組のとき2日目が1日目と同じ並びに戻ってしまう）
+  eq([r.days[0], r.days[1], r.days[2]].map(function (d) { return d.groupOrder[0]; }).join(','),
+    'f1,f3,f2', '毎日ちがう組がいちばん前に来ていない');
 
   // どの日も、前席組は前から3列目までに収まっている
   r.days.forEach(function (d, di) {

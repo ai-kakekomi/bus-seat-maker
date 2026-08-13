@@ -3283,7 +3283,10 @@
       var pairIndex = Math.floor(d / 2);
       var day = input.engine !== 'legacy' ? tetrisDay(layout, groups, {
         startIndex: startIndexForDay(rotating, pairIndex, dayCount),
-        frontStartIndex: startIndexForDay(frontRotating, d, dayCount),
+        // 前席組も、ずらすのは2日ごと（pairIndex）。日ごとにずらすと、
+        // 2日目の前後反転と打ち消し合って並びが元に戻ってしまう
+        // （前席組が2組のとき、1つずらして反転すると1日目と同じ並びになる）
+        frontStartIndex: startIndexForDay(frontRotating, pairIndex, dayCount),
         reversed: d % 2 === 1,
         sharing: sharing,
         idealFeasible: feasible,
