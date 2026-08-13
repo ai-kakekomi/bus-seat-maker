@@ -2234,6 +2234,10 @@
             if (!g1 || !g2) continue;
             // 男女の内訳が同じなら入れ替えても意味がない
             if (genderKey(g1) === genderKey(g2)) continue;
+            // 前のお席をご希望の組を、そうでない組と入れ替えない
+            // （料金をいただいている席を、男女の並びの都合で手放さないため）
+            if (g1.frontOption !== g2.frontOption) continue;
+            if (g1.rearOption !== g2.rearOption) continue;
 
             if (!swapSlots(arr[i], arr[j])) continue;
             var now = conflicts();
@@ -2914,14 +2918,44 @@
     return refreshDay(layout, day);
   }
 
-  /** 出来ばえ。小さいほど良い（あぶれない ＞ 本来のかたち ＞ 最後部列を使わない） */
-  function tetrisScore(layout, groups, day) {
+  var TETRIS_FRONT_OUT = 50; // 前席をご希望の組が前3列から出てしまうことへの減点
+  var TETRIS_REAR_STAY = 16; // 2日つづけて後方に座ってしまった組1組ぶんの減点
+  var TETRIS_ORDER_DRIFT = 0.2; // 申し込み順から1組ぶん離れることへの減点
+
+  /**
+   * 出来ばえ。小さいほど良い。
+   *   あぶれない ＞ 離れ離れにならない ＞ 前席オプションを守る
+   *     ＞ 本来のかたち ＞ 最後部列を使わない ＞ 申し込み順のまま
+   *
+   * いちばん最後の「申し込み順のまま」は、ほかが同じくらい良いときの決め手です。
+   * 見直し（③〜⑤）が、直す必要のない組まで動かしてしまうのを防ぎます。
+   */
+  function tetrisScore(layout, groups, day, baseIndex, previousRows) {
     var want = groups.reduce(function (a, g) { return a + g.size; }, 0);
     var seated = Object.keys(day.placements).length;
     var rear = 0;
     Object.keys(day.placements).forEach(function (sid) {
       if (sid.indexOf('r' + layout.lastRow + '-') === 0) rear = 1;
     });
+
+    // 前席をご希望の組が、前3列から出ていないか
+    var frontOut = 0;
+    groups.forEach(function (g) {
+      if (!g.frontOption) return;
+      var seats = (day.seatsOfGroup && day.seatsOfGroup[g.id]) || [];
+      var out = seats.some(function (sid) {
+        return Number(/^r(\d+)-/.exec(sid)[1]) > FRONT_ROWS;
+      });
+      if (out) frontOut++;
+    });
+
+    // 申し込み順からどれだけ離れたか
+    var drift = 0;
+    if (baseIndex) {
+      (day.groupOrder || []).forEach(function (id, i) {
+        if (baseIndex[id] != null) drift += Math.abs(baseIndex[id] - i);
+      });
+    }
     var blockCount = {};
     (day.blocks || []).forEach(function (b) {
       blockCount[b.groupId] = (blockCount[b.groupId] || 0) + 1;
@@ -2930,8 +2964,12 @@
     Object.keys(blockCount).forEach(function (gid) {
       if (blockCount[gid] > 1) split += blockCount[gid] - 1;
     });
-    return (want - seated) * 10000 + split * 100 +
-      nonIdealGroups(groups, day).length * 10 + rear * 3;
+    // 前の日につづけて後方になってしまった組の数
+    var stay = previousRows ? rearStayCount(layout, groups, day, previousRows) : 0;
+
+    return (want - seated) * 10000 + split * 100 + frontOut * TETRIS_FRONT_OUT +
+      nonIdealGroups(groups, day).length * 10 + stay * TETRIS_REAR_STAY +
+      rear * 3 + drift * TETRIS_ORDER_DRIFT;
   }
 
   /** 並べる順番を作る。前席組 → 通常組 → 後方ご希望の組。2日目以降は逆順 */
@@ -2968,70 +3006,152 @@
     // 「ふつうに前から落とす」やり方と、「前の列にすき間を残さない」やり方の
     // 両方で最後まで組んでみて、出来のよいほうを採ります。
     // （前者は空いているバスで自然な形になり、後者はぎゅうぎゅうのときに敷き詰まります）
-    var solvedA = tetrisSolve(layout, groups, base, run, false);
+    var baseIndex = {};
+    base.forEach(function (g, i) { baseIndex[g.id] = i; });
+
+    var prevRows = opt.previousRows || null;
+    var solvedA = tetrisSolve(layout, groups, base, baseIndex, prevRows, run, false);
     var best = solvedA.day;
-    if (solvedA.score >= 10) {
-      var solvedB = tetrisSolve(layout, groups, base, run, true);
+    if (tetrisTrouble(layout, groups, solvedA.day, prevRows) > 0) {
+      var solvedB = tetrisSolve(layout, groups, base, baseIndex, prevRows, run, true);
       if (solvedB.score < solvedA.score) best = solvedB.day;
     }
 
     return tetrisFinish(layout, groups, best);
   }
 
-  var TETRIS_BUDGET = 400; // 見直しに使ってよい試行回数（どうにもならない構成で粘りすぎないため）
+  var TETRIS_BUDGET = 1200; // 見直しに使ってよい試行回数（どうにもならない構成で粘りすぎないため）
+
+  /**
+   * 見直しが必要な度合い。0なら、これ以上どうしようもないか、すでに理想どおり。
+   * （最後部列を使ったことや、申し込み順からのずれは「困りごと」には数えません）
+   */
+  function tetrisTrouble(layout, groups, day, previousRows) {
+    var want = groups.reduce(function (a, g) { return a + g.size; }, 0);
+    var seated = Object.keys(day.placements).length;
+    var blockCount = {};
+    (day.blocks || []).forEach(function (b) {
+      blockCount[b.groupId] = (blockCount[b.groupId] || 0) + 1;
+    });
+    var split = 0;
+    Object.keys(blockCount).forEach(function (gid) {
+      if (blockCount[gid] > 1) split += blockCount[gid] - 1;
+    });
+    // 前席オプションのはみ出しは、前3列の席数が足りなければどうにもならないので、
+    // ここには数えません（出来ばえの点数では見ています）
+    var stay = previousRows ? rearStayCount(layout, groups, day, previousRows) : 0;
+    return (want - seated) + split + stay + nonIdealGroups(groups, day).length;
+  }
+
+  /**
+   * 順番を動かして試す組を、優先順に並べる。
+   * いま困っている組（分かれた・座れない・かたちが崩れた）が先。
+   * そのあとは、うしろの組から。前のほうのお客様は、動かす理由がなければ動かしません。
+   */
+  function tetrisMoveOrder(layout, groups, day, order) {
+    var blockCount = {};
+    (day.blocks || []).forEach(function (b) {
+      blockCount[b.groupId] = (blockCount[b.groupId] || 0) + 1;
+    });
+    var bad = {};
+    nonIdealGroups(groups, day).forEach(function (g) { bad[g.id] = true; });
+    groups.forEach(function (g) {
+      var seats = (day.seatsOfGroup && day.seatsOfGroup[g.id]) || [];
+      if (blockCount[g.id] > 1 || seats.length !== g.size) bad[g.id] = true;
+    });
+
+    var first = [];
+    var rest = [];
+    order.forEach(function (g, i) { (bad[g.id] ? first : rest).push(i); });
+    rest.reverse();
+    return first.concat(rest);
+  }
 
   /** ①〜⑤の手順を、指定のやり方で最後まで通す */
-  function tetrisSolve(layout, groups, base, rawRun, tight) {
+  function tetrisSolve(layout, groups, base, baseIndex, prevRows, rawRun, tight) {
     var budget = TETRIS_BUDGET;
+    // 同じ並び・同じかたちの指定は何度も出てくるので、一度組んだものは取っておきます
+    var memo = {};
     function run(o, a, l, t) {
+      var key = o.map(function (g) { return g.id; }).join(',') + '|' + l + '|' + (t ? 1 : 0) +
+        '|' + Object.keys(a).sort().map(function (k) { return k + ':' + a[k].join('+'); }).join(',');
+      if (memo[key]) return memo[key];
       budget--;
-      return rawRun(o, a, l, t);
+      return (memo[key] = rawRun(o, a, l, t));
     }
+    function score(d) { return tetrisScore(layout, groups, d, baseIndex, prevRows); }
+    function trouble(d) { return tetrisTrouble(layout, groups, d, prevRows); }
     var alt = {};
     var order = base.slice();
     var best = run(order, alt, layout.lastRow - 1, tight);
-    var bestScore = tetrisScore(layout, groups, best);
+    var bestScore = score(best);
+    var bestTrouble = trouble(best);
 
     // ② 最後部列は最終手段。あぶれた人がいるときだけ解放する
     var limitRow = layout.lastRow - 1;
-    if (bestScore >= 10) {
+    if (bestTrouble > 0) {
       var withRear = run(order, alt, layout.lastRow, tight);
-      var rearScore = tetrisScore(layout, groups, withRear);
+      var rearScore = score(withRear);
       if (rearScore < bestScore) {
-        best = withRear; bestScore = rearScore; limitRow = layout.lastRow;
+        best = withRear; bestScore = rearScore; bestTrouble = trouble(best);
+        limitRow = layout.lastRow;
       }
     }
 
     // ③ 端数を打ち消すために、組の順番を入れ替える。
     //    となりと入れ替えるだけでなく、収まらなかった組は前のほうへ動かしてみます。
-    for (var pass = 0; pass < 2 && bestScore >= 10 && budget > 0; pass++) {
-      var moves = 0;
-      for (var i = 0; i < order.length && bestScore >= 10 && budget > 0; i++) {
+    for (var pass = 0; pass < 30 && bestTrouble > 0 && budget > 0; pass++) {
+      var moved = false;
+      // 動かす組は「いま困っている組」から。次にうしろの組から。
+      // 先頭から順に動かすと、直す必要のない最初のお客様まで動いてしまいます
+      var todo = tetrisMoveOrder(layout, groups, best, order);
+      for (var ti = 0; ti < todo.length && bestTrouble > 0 && budget > 0; ti++) {
+        var i = todo[ti];
         // 近くの組と入れ替えるほか、いちばん前・いちばん後ろへ動かすのも試します
         // （5名の組を最後に回して、最後部列の5席にぴったり収める、など）
         var spots = [0, order.length - 1];
         for (var q = Math.max(0, i - 6); q < Math.min(order.length, i + 7); q++) spots.push(q);
+        // いちばん良くなる動かし方を選びます。先に見つかったものを採ると、
+        // 直す必要のない組まで動かしてしまい、申し込み順が崩れます
+        var pick = null;
         for (var jj = 0; jj < spots.length; jj++) {
           var j = spots[jj];
           if (j === i) continue;
           if (order[i].frontOption !== order[j].frontOption) continue;
           if (order[i].rearOption !== order[j].rearOption) continue;
-          var moved = order.slice();
-          moved.splice(i, 1);
-          moved.splice(j, 0, order[i]);
-          var d = run(moved, alt, limitRow, tight);
-          var sc = tetrisScore(layout, groups, d);
-          if (sc < bestScore) { order = moved; best = d; bestScore = sc; moves++; break; }
+          // ずらす（あいだの組は1つずつ繰り上がる）／入れ替える（2組だけ交換する）の両方
+          var cands = [];
+          var moveCand = order.slice();
+          moveCand.splice(i, 1);
+          moveCand.splice(j, 0, order[i]);
+          cands.push(moveCand);
+          var swapCand = order.slice();
+          swapCand[i] = order[j];
+          swapCand[j] = order[i];
+          cands.push(swapCand);
+
+          for (var ci = 0; ci < cands.length; ci++) {
+            var d = run(cands[ci], alt, limitRow, tight);
+            var sc = score(d);
+            if (sc < bestScore - 1e-9 && (!pick || sc < pick.score)) {
+              pick = { order: cands[ci], day: d, score: sc };
+            }
+          }
+        }
+        if (pick) {
+          order = pick.order; best = pick.day; bestScore = pick.score;
+          bestTrouble = trouble(best); moved = true;
+          break; // 並びが変わったので、困っている組を数えなおしてやり直す
         }
       }
-      if (!moves) break;
+      if (!moved) break;
     }
 
     // ④ それでも収まらなければ、かたちを変えて端数を打ち消す
     //    （3名をL字に、5名を横一列4＋1に、など）
-    for (var round = 0; round < 2 && bestScore >= 10 && budget > 0; round++) {
+    for (var round = 0; round < 2 && bestTrouble > 0 && budget > 0; round++) {
       var improved = false;
-      for (var k = 0; k < order.length && bestScore >= 10 && budget > 0; k++) {
+      for (var k = 0; k < order.length && bestTrouble > 0 && budget > 0; k++) {
         var g = order[k];
         if (alt[g.id]) continue;
         var vs = tetrisVariants(g.size).slice(1, 6);
@@ -3039,8 +3159,11 @@
           var trial = merge2(alt, {});
           trial[g.id] = vs[v];
           var d2 = run(order, trial, limitRow, tight);
-          var sc2 = tetrisScore(layout, groups, d2);
-          if (sc2 < bestScore) { alt = trial; best = d2; bestScore = sc2; improved = true; break; }
+          var sc2 = score(d2);
+          if (sc2 < bestScore) {
+            alt = trial; best = d2; bestScore = sc2;
+            bestTrouble = trouble(best); improved = true; break;
+          }
         }
       }
       if (!improved) break;
@@ -3048,11 +3171,12 @@
 
     // ⑤ ここまでで収まらないのは、かたちを1つ変えただけでは足りない込み具合。
     //    「1つ変えても悪くならない」なら変えてしまい、その先で打ち消せないかを見ます。
-    if (bestScore >= 10) {
+    if (bestTrouble > 0) {
       var drifted = alt;
       var driftScore = bestScore;
       var driftDay = best;
-      for (var dk = 0; dk < order.length && driftScore >= 10 && budget > 0; dk++) {
+      var driftTrouble = bestTrouble;
+      for (var dk = 0; dk < order.length && driftTrouble > 0 && budget > 0; dk++) {
         var dg = order[dk];
         if (drifted[dg.id]) continue;
         var dvs = tetrisVariants(dg.size).slice(1, 5);
@@ -3060,8 +3184,11 @@
           var dtrial = merge2(drifted, {});
           dtrial[dg.id] = dvs[dv];
           var dd = run(order, dtrial, limitRow, tight);
-          var dsc = tetrisScore(layout, groups, dd);
-          if (dsc <= driftScore) { drifted = dtrial; driftDay = dd; driftScore = dsc; break; }
+          var dsc = score(dd);
+          if (dsc <= driftScore) {
+            drifted = dtrial; driftDay = dd; driftScore = dsc;
+            driftTrouble = trouble(dd); break;
+          }
         }
       }
       if (driftScore < bestScore) { alt = drifted; best = driftDay; bestScore = driftScore; }
@@ -3117,15 +3244,15 @@
     var stay = rearStayCount(layout, groups, day, opt.previousRows);
     if (!stay) return day;
 
-    var baseScore = tetrisScore(layout, groups, day);
-    for (var k = 1; k <= 3 && stay > 0; k++) {
+    var baseTrouble = tetrisTrouble(layout, groups, day);
+    for (var k = 1; k <= 5 && stay > 0 && k < opt.rotatingCount; k++) {
       var shift = (opt.startIndex + k) % opt.rotatingCount;
       var alt = tetrisAssignDay(layout, groups, merge2(opt, { startIndex: shift }));
       var altStay = rearStayCount(layout, groups, alt, opt.previousRows);
-      var altScore = tetrisScore(layout, groups, alt);
+      var altTrouble = tetrisTrouble(layout, groups, alt);
       // 席の出来ばえを落とさない範囲でだけ、席替えのために乗り換えます
-      if (altStay < stay && altScore <= baseScore) {
-        day = alt; stay = altStay; baseScore = altScore;
+      if (altStay < stay && altTrouble <= baseTrouble) {
+        day = alt; stay = altStay; baseTrouble = altTrouble;
       }
     }
     return day;
