@@ -1331,6 +1331,33 @@
     return n;
   }
 
+  /**
+   * 「2日つづけて後方」のお知らせ文。該当なしなら null。
+   * day.previousRows（前の日の、グループごとのいちばん前の列）が入っているときだけ働きます。
+   */
+  function rearStayNotice(layout, groups, day) {
+    var previousRows = day.previousRows;
+    if (!previousRows) return null;
+    var rearFrom = layout.lastRow - REAR_ROWS + 1;
+    var now = dayRowMap(groups, day);
+    var stuck = groups.filter(function (g) {
+      if (g.frontOption) return false;
+      if (!previousRows[g.id] || !now[g.id]) return false;
+      return previousRows[g.id] >= rearFrom && now[g.id] >= rearFrom;
+    });
+    if (stuck.length === 0) return null;
+
+    var names = stuck.map(function (g) {
+      return 'お客様' + alpha(g.order + 1) + '（' + g.size + '名）';
+    });
+    return {
+      type: 'rear-stay', level: 'warn',
+      message: names.join('、') + 'が、前の日につづけてバスの後方（うしろ' + REAR_ROWS +
+        '列）になっています。席がほぼ埋まっていて、前のほうに移す並べ方が見つかりませんでした。' +
+        '後方の当番は日ごとに回すようにしていますので、気になる場合は手で入れ替えてください。'
+    };
+  }
+
   function buildBestDay(layout, groups, opt, target, rotatingCount) {
     function make(startIndex, reversed) {
       var day = assignDay(layout, groups, {
@@ -1522,6 +1549,10 @@
     // 6. 理想のかたちに収まっているか（まとめて1件）
     var shapeNote = shapeNotice(groups, day);
     if (shapeNote) issues.push(shapeNote);
+
+    // 7. 前の日につづけて後方になっていないか
+    var rearNote = rearStayNotice(layout, groups, day);
+    if (rearNote) issues.push(rearNote);
 
     // 同じ内容の注意は1件にまとめる
     var seen = {};
@@ -2124,6 +2155,10 @@
         previousSeatMaps: days.map(daySeatMap)
       }, startIndexForDay(rotating, pairIndex, dayCount), rotating.length);
       day.dayIndex = d;
+      // 前の日の並びを控えておく（手で直したあとの見直しでも使います）
+      day.previousRows = d > 0 ? dayRowMap(groups, days[d - 1]) : null;
+      var rearNote = rearStayNotice(layout, groups, day);
+      if (rearNote) day.warnings.push(rearNote);
       sharedGroupIds(day).forEach(function (id) {
         shareHistory[id] = (shareHistory[id] || 0) + 1;
       });

@@ -1220,6 +1220,36 @@ test('2日つづけて後方に座らされる組は出ない（ほぼ満席の�
   });
 });
 
+test('どうしても後方が続くときは、座席表の下でお知らせする', function () {
+  // 満席43名。5名の組が1つだけなので、最後部（5席）はその組しか埋められない
+  var groups = [group('X', 5)];
+  for (var i = 0; i < 19; i++) groups.push(group('p' + i, 2));
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 2 });
+  eq(r.totalPeople, 43, '人数');
+
+  var note = r.days[1].warnings.filter(function (w) { return w.type === 'rear-stay'; });
+  eq(note.length, 1, 'お知らせが出ていない');
+  ok(note[0].message.indexOf('お客様A（5名）') >= 0, '対象の組が書かれていない');
+
+  // 1日目には出ない（比べる前の日がないため）
+  eq(r.days[0].warnings.filter(function (w) { return w.type === 'rear-stay'; }).length, 0,
+    '1日目にお知らせが出ている');
+});
+
+test('後方が続かないときは、お知らせを出さない', function () {
+  var groups = [
+    group('A', 2, { frontOption: true }), group('B', 2, { frontOption: true }),
+    group('C', 3, { frontOption: true }), group('D', 4, { frontOption: true }),
+    group('E', 4), group('F', 3), group('G', 5), group('H', 1), group('I', 2),
+    group('J', 3), group('K', 1), group('L', 6), group('M', 1), group('N', 5)
+  ];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 3 });
+  var all = r.days.reduce(function (a, d) {
+    return a.concat(d.warnings.filter(function (w) { return w.type === 'rear-stay'; }));
+  }, []);
+  eq(all.length, 0, '見本の構成で余計なお知らせが出ている');
+});
+
 test('日ごとの並びは「似ぐあい」で見る（1人動かしただけでは別物にしない）', function () {
   var r = S.assign({ layoutType: '11x45', groups: fullHouseGroups(), days: 3 });
   var maps = r.days.map(S.daySeatMap);
