@@ -617,6 +617,29 @@ test('窓側から埋める（通路側だけ使って窓側を空けない）',
   ok(cols.indexOf(1) >= 0, '左窓（col1）を空けている: col' + cols.join(','));
 });
 
+test('最前列の2席は、前席をご希望の2名の組にゆずる', function () {
+  // 最前列はお客様が座れるのが2席だけ。3名の組を先に置くと、
+  // 2席に収まらず次の列へはみ出して、かたちが崩れてしまう
+  var groups = [
+    group('trio', 3, { frontOption: true }),
+    group('quad', 4, { frontOption: true }),
+    group('pair', 2, { frontOption: true }),
+    group('rest', 6)
+  ];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  var day = r.days[0];
+
+  eq(day.groupOrder[0], 'pair', '2名の組から置いていない');
+  var pairRows = day.seatsOfGroup['pair'].map(seatRow);
+  eq(Math.min.apply(null, pairRows), 1, '2名の組が最前列にいない');
+  eq(Math.max.apply(null, pairRows), 1, '2名の組が最前列からはみ出している');
+
+  // 3名の組は、はみ出さずに横一列で収まる
+  var bs = blocksOf(day, 'trio');
+  eq(bs.length, 1, '3名のブロック数');
+  eq(bs[0].row0, bs[0].row1, '3名が横一列になっていない');
+});
+
 test('最後部列（5席横並び）は最終手段で、空きがあるうちは使わない', function () {
   var r = S.assign({ layoutType: '11x45', groups: [group('g1', 4), group('g2', 3)], days: 1 });
   var day = r.days[0];
