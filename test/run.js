@@ -1237,8 +1237,29 @@ test('4日ツアーは「ずらす」と「前後反転」を組み合わせる'
 
   var r = S.assign({ layoutType: '11x45', groups: groups, days: 4 });
   eq(r.days.map(function (d) { return d.reversed ? 'R' : '-'; }).join(''), '-R-R', '反転する日');
-  eq(r.days[2].groupOrder.join(','), 'g3,g4,g5,g6,g7,g8,g1,g2', '3日目の順序');
+  eq(r.days[2].groupOrder[0], 'g3', '3日目にずらした開始位置');
+  eq(r.days[2].groupOrder.slice().sort().join(','), 'g1,g2,g3,g4,g5,g6,g7,g8', '3日目に組が欠けている');
   eq(r.days[3].groupOrder.join(','), 'g2,g1,g8,g7,g6,g5,g4,g3', '4日目の順序');
+
+  // うしろ半分に2日つづけているお客様がいないこと。
+  // 3日目は、ずらしただけだと1日目のうしろ2組がまたうしろに来るので、
+  // 席替えのために並びが少し変わります（開始位置はずらしたまま）
+  var half = Math.ceil(r.layout.lastRow / 2) + 1;
+  function rearIds(day) {
+    var out = {};
+    groups.forEach(function (g) {
+      var rows = (day.seatsOfGroup[g.id] || []).map(seatRow);
+      if (rows.length && Math.min.apply(null, rows) >= half) out[g.id] = true;
+    });
+    return out;
+  }
+  for (var di = 1; di < r.days.length; di++) {
+    var prev = rearIds(r.days[di - 1]);
+    var now = rearIds(r.days[di]);
+    Object.keys(now).forEach(function (id) {
+      ok(!prev[id], (di + 1) + '日目も' + id + 'がうしろ半分にいる');
+    });
+  }
   // 1日目とまったく同じ並びになる日はない
   var seen = {};
   r.days.forEach(function (d, i) {
@@ -1556,6 +1577,33 @@ test('どうしても後方が続くときは、座席表の下でお知らせ�
   // 1日目には出ない（比べる前の日がないため）
   eq(r.days[0].warnings.filter(function (w) { return w.type === 'rear-stay'; }).length, 0,
     '1日目にお知らせが出ている');
+});
+
+test('うしろ半分が2日つづくお客様は、できるだけ減らす（ほぼ満席の見本）', function () {
+  // 検収で「LとNが連日後方」と指摘された件。最後部2列に届かなくても、
+  // うしろ半分が2日つづけば、お客様から見れば席替えになっていません。
+  //
+  // ただし、ゼロにはできません。42名／43席で前席オプションが4組いると、
+  // 残る10組のうち5組ほどは毎日うしろ半分に入るしかないためです。
+  // 重み（TETRIS_REAR_HALF）を入れる前は4組が連続していました。
+  var r = S.assign({ layoutType: '11x45', groups: fullHouseGroups(), days: 3 });
+  var half = Math.ceil(r.layout.lastRow / 2) + 1;
+  function rearIds(day) {
+    var out = {};
+    r.groups.forEach(function (g) {
+      if (g.frontOption || g.rearOption) return;
+      var rows = (day.seatsOfGroup[g.id] || []).map(seatRow);
+      if (rows.length && Math.min.apply(null, rows) >= half) out[g.id] = true;
+    });
+    return out;
+  }
+  for (var di = 1; di < r.days.length; di++) {
+    var prev = rearIds(r.days[di - 1]);
+    var now = rearIds(r.days[di]);
+    var both = Object.keys(now).filter(function (id) { return prev[id]; });
+    ok(both.length <= 2,
+      (di + 1) + '日目にうしろ半分が続いた組が多すぎる: ' + both.join(','));
+  }
 });
 
 test('後方が続かないときは、お知らせを出さない', function () {
