@@ -170,13 +170,14 @@
       var no = i + 1;
       var auto = 'お客様' + alpha(no);
       var surname = (g.surname || '').trim();
-      var full = (g.fullName || '').trim();
+      var given = (g.givenName || '').trim();
       var label = auto;
       var duplicated = false;
 
       if (useRealName && surname) {
         duplicated = count[surname] > 1;
-        if (duplicated && full) label = full + '様';
+        // 同姓のお客様がいるときだけ、名字に下のお名前をつづけてフルネームにする
+        if (duplicated && given) label = surname + given + '様';
         else label = surname + '様';
       }
 
@@ -189,8 +190,12 @@
         autoLabel: auto,
         usedRealName: useRealName && !!surname,
         duplicatedSurname: duplicated,
-        // 同姓が複数なのにフルネーム未入力 → 画面で注意を出すための印
-        needsFullName: duplicated && !full,
+        // 同姓が複数なのに下のお名前が未入力 → 画面で注意を出すための印
+        needsGivenName: duplicated && !given,
+        // 同じ名字のほかのグループ（画面から行き来できるようにするため）
+        sameSurnameGroupIds: duplicated ? groups.filter(function (o) {
+          return o.id !== g.id && (o.surname || '').trim() === surname;
+        }).map(function (o) { return o.id; }) : [],
         size: g.size,
         sizeMark: maru(g.size)
       };
@@ -216,7 +221,7 @@
         members: members,
         frontOption: !!g.frontOption,
         surname: g.surname || '',
-        fullName: g.fullName || ''
+        givenName: g.givenName || ''
       };
     });
   }
@@ -274,6 +279,77 @@
   var IDEAL_BONUS = 2.5; // 理想のかたちに収まったときの、ごほうび点（他の好みより強い）
   var ROW_LOOKAHEAD = 1; // 理想のかたちを求めて、うしろの列を何列ぶんまで見にいくか
   var ROW_PENALTY = 1.0; // 1列うしろにずらすことへの減点（IDEAL_BONUS より小さくしてある）
+  var WINDOW_PENALTY = 0.3; // おひとり様が窓側でないことへの減点（列の前後より弱くしてある）
+
+  /**
+   * おひとり様は窓側が自然なので、通路側だと軽く減点します。
+   * 同じ列のなかでの選び分けにだけ効く強さにしてあり、
+   * これが理由でうしろの列に回ることはありません。
+   * 窓側＝通常列は col1（左窓）と col4（右窓）／最後部列は col1 と col5。
+   */
+  function windowPenalty(count, cells, lastRow) {
+    if (count !== 1 || cells.length !== 1) return 0;
+    var c = cells[0];
+    var isWindow = c.row === lastRow
+      ? (c.col === 1 || c.col === 5)
+      : (c.col === 1 || c.col === 4);
+    return isWindow ? 0 : WINDOW_PENALTY;
+  }
+
+  // 理想のかたちを、お客様に見せる言葉にしたもの
+  var IDEAL_SHAPE_NAMES = {
+    1: '1席',
+    2: '横に2席',
+    3: '通路をまたいだ横一列（■■｜■）',
+    4: '片側に集めた正方形（■■／■■）',
+    5: '正方形＋通路をまたいで1席（■■｜■／■■）',
+    6: '横一列4席＋2席（■■｜■■／■■）'
+  };
+
+  /**
+   * 理想のかたちに収まらなかったグループを拾う。
+   * ひとつづきに座れているグループだけを見ます
+   * （離れ離れになっている場合は、それ自体をもっと重い注意として別に出すため）。
+   */
+  function nonIdealGroups(groups, day) {
+    var count = {};
+    var box = {};
+    (day.blocks || []).forEach(function (b) {
+      count[b.groupId] = (count[b.groupId] || 0) + 1;
+      box[b.groupId] = b;
+    });
+    return groups.filter(function (g) {
+      if (count[g.id] !== 1) return false;
+      var want = IDEAL_SHAPES[g.size];
+      if (!want) return false;
+      var b = box[g.id];
+      if (b.people !== g.size) return false; // 取り置き空席つきの枠は別の話
+      return (b.col1 - b.col0 + 1) !== want.w || (b.row1 - b.row0 + 1) !== want.h;
+    });
+  }
+
+  /** 「理想のかたちになっていません」のお知らせ文。該当なしなら null */
+  function shapeNotice(groups, day) {
+    var odd = nonIdealGroups(groups, day);
+    if (odd.length === 0) return null;
+    var names = odd.map(function (g) {
+      return 'お客様' + alpha(g.order + 1) + '（' + g.size + '名）';
+    });
+    // 人数ごとに「本来のかたち」を1回だけ添える
+    var sizes = [];
+    odd.forEach(function (g) { if (sizes.indexOf(g.size) < 0) sizes.push(g.size); });
+    var shapes = sizes.sort(function (a, b) { return a - b; }).map(function (n) {
+      return n + '名の本来のかたちは ' + IDEAL_SHAPE_NAMES[n] + ' です。';
+    }).join('');
+
+    return {
+      type: 'shape-differs', level: 'warn',
+      message: '席が混んでいるため、' + odd.length + '組が本来のかたちになっていません：' +
+        names.join('、') + '。' + shapes +
+        'ほかのグループがひとつづきに座れることを優先した結果です。' +
+        'かたちをそろえたい場合は、手で入れ替えてください。'
+    };
+  }
 
   /** 席のかたまりの外わく（何列ぶん × 何席ぶんに収まっているか） */
   function cellBox(cells) {
@@ -578,6 +654,7 @@
                 var score = WIDTH_PENALTY[w] + h * 0.4 + sh.waste * 0.6 + sh.cut * 0.15 +
                   aislePenalty(sh.seats, lastRow) +
                   idealBonus(count, sh.seats) +
+                  windowPenalty(count, sh.seats, lastRow) +
                   (opt.group ? genderHint(sh.seats, opt.group) : 0);
                 if (!best || score < best.score - 1e-9 ||
                     (Math.abs(score - best.score) < 1e-9 && c0 < best.c0)) {
@@ -1024,6 +1101,10 @@
         };
       }
     }
+    // 理想のかたちに収まらなかった組があれば、まとめて1件お知らせする
+    var shapeNote = shapeNotice(groups, day);
+    if (shapeNote) warnings.push(shapeNote);
+
     // 同じ内容の注意が重ならないようにする
     var wseen = {};
     for (var wj = warnings.length - 1; wj >= 0; wj--) {
@@ -1046,7 +1127,9 @@
     var odd = day.warnings.filter(function (w) {
       return w.type === 'odd-shape' || w.type === 'deep-block';
     }).length;
-    return (want - seated) * 10000 + split * 100 + mixed * 5 + odd;
+    // 理想のかたちに収まらなかった組の数。かたちより「離れないこと」がずっと大事なので、軽い重み
+    var offShape = nonIdealGroups(groups, day).length;
+    return (want - seated) * 10000 + split * 100 + mixed * 5 + odd + offShape * 0.5;
   }
 
   /** 分かれてしまった組を先に置き直して、解けるかどうかもう一度試す */
@@ -1290,6 +1373,10 @@
         });
       }
     });
+
+    // 6. 理想のかたちに収まっているか（まとめて1件）
+    var shapeNote = shapeNotice(groups, day);
+    if (shapeNote) issues.push(shapeNote);
 
     // 同じ内容の注意は1件にまとめる
     var seen = {};
@@ -1962,6 +2049,8 @@
     physicalNeighbors: physicalNeighbors,
     normalizeGroups: normalizeGroups,
     shouldAvoidSharing: shouldAvoidSharing,
+    IDEAL_SHAPES: IDEAL_SHAPES,
+    nonIdealGroups: nonIdealGroups,
     startIndexForDay: startIndexForDay,
     dayScore: dayScore,
     daySeatMap: daySeatMap,

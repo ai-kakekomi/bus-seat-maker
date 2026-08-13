@@ -37,7 +37,7 @@ function group(id, size, opt) {
   return {
     id: id, size: size, members: members,
     frontOption: !!opt.frontOption,
-    surname: opt.surname || '', fullName: opt.fullName || ''
+    surname: opt.surname || '', givenName: opt.givenName || ''
   };
 }
 function seatRow(seatId) { return Number(String(seatId).split('-')[0].slice(1)); }
@@ -312,6 +312,49 @@ test('3名グループは通路をまたいだ横一列（■■｜■）にな�
     eq(bs[0].row1 - bs[0].row0 + 1, wantH, '列数');
     eq(Object.keys(day.reserved).length, 0, '枠の中の取り置き空席');
   });
+});
+
+test('相席なしのおひとり様は窓側に座る', function () {
+  // 1列目の左（col1）が窓側。右2席は業務席なので、2組目は2列目に回る
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 1), group('g2', 1)], days: 1 });
+  var day = r.days[0];
+  function colOf(id) {
+    var sid = day.seatsOfGroup[id][0];
+    return Number(sid.split('-')[1]);
+  }
+  ok(colOf('g1') === 1 || colOf('g1') === 4, 'g1が通路側に座っている: col' + colOf('g1'));
+  ok(colOf('g2') === 1 || colOf('g2') === 4, 'g2が通路側に座っている: col' + colOf('g2'));
+});
+
+test('本来のかたちに収まらなかった組は、座席表の下でお知らせする', function () {
+  // ほぼ満席（42名／43席）。3名の組が横一列で置ききれなくなる
+  var sizes = [4, 3, 3, 1, 2, 4, 3, 1, 5, 3, 2, 3, 1, 3, 2, 2];
+  var groups = [];
+  var total = 0;
+  sizes.forEach(function (n, i) {
+    if (total >= 42) return;
+    var take = Math.min(n, 42 - total);
+    groups.push(group('g' + i, take));
+    total += take;
+  });
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  var day = r.days[0];
+
+  var off = S.nonIdealGroups(r.groups, day);
+  ok(off.length > 0, 'この構成では本来のかたちに収まらない組が出るはず');
+
+  var note = day.warnings.filter(function (w) { return w.type === 'shape-differs'; });
+  eq(note.length, 1, 'お知らせは1件にまとめる');
+  ok(note[0].message.indexOf(off.length + '組') >= 0, '組数が入っていない');
+  ok(note[0].message.indexOf('通路をまたいだ横一列') >= 0, '本来のかたちが書かれていない');
+});
+
+test('本来のかたちに収まっていれば、お知らせは出ない', function () {
+  var groups = [group('g1', 3), group('g2', 4), group('g3', 5), group('g4', 6)];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  eq(S.nonIdealGroups(r.groups, r.days[0]).length, 0, '本来のかたちに収まっていない組がある');
+  eq(r.days[0].warnings.filter(function (w) { return w.type === 'shape-differs'; }).length, 0,
+    '余計なお知らせが出ている');
 });
 
 test('最後部列（5席横並び）は最終手段で、空きがあるうちは使わない', function () {
@@ -1401,24 +1444,36 @@ test('実名表示ONなら「名字＋様」', function () {
   eq(labels[1].label, '鈴木様');
 });
 
-test('同姓が複数いるときは自動でフルネーム表示になる', function () {
+test('同姓が複数いるときは、名字に下のお名前をつづけて表示する', function () {
   var labels = S.resolveLabels([
-    { id: 'g1', size: 2, surname: '佐藤', fullName: '佐藤太郎' },
-    { id: 'g2', size: 1, surname: '佐藤', fullName: '佐藤花子' },
-    { id: 'g3', size: 1, surname: '鈴木', fullName: '鈴木一郎' }
+    { id: 'g1', size: 2, surname: '佐藤', givenName: '太郎' },
+    { id: 'g2', size: 1, surname: '佐藤', givenName: '花子' },
+    { id: 'g3', size: 1, surname: '鈴木', givenName: '一郎' }
   ], { useRealName: true });
   eq(labels[0].label, '佐藤太郎様');
   eq(labels[1].label, '佐藤花子様');
-  eq(labels[2].label, '鈴木様', '同姓でない人はフルネームにしない');
+  eq(labels[2].label, '鈴木様', '同姓でない人は下のお名前を出さない');
 });
 
-test('同姓なのにフルネーム未入力なら印が付く', function () {
+test('同姓なのに下のお名前が未入力なら印が付く', function () {
   var labels = S.resolveLabels([
     { id: 'g1', size: 1, surname: '佐藤' },
     { id: 'g2', size: 1, surname: '佐藤' }
   ], { useRealName: true });
-  eq(labels[0].needsFullName, true);
+  eq(labels[0].needsGivenName, true);
   eq(labels[0].label, '佐藤様');
+});
+
+test('同姓のグループどうしが、おたがいの相手を指し示す', function () {
+  var labels = S.resolveLabels([
+    { id: 'g1', size: 1, surname: '佐藤' },
+    { id: 'g2', size: 1, surname: '鈴木' },
+    { id: 'g3', size: 1, surname: '佐藤' },
+    { id: 'g4', size: 1, surname: '佐藤' }
+  ], { useRealName: true });
+  eq(labels[0].sameSurnameGroupIds.join(','), 'g3,g4', '佐藤（1組目）から見た同姓');
+  eq(labels[2].sameSurnameGroupIds.join(','), 'g1,g4', '佐藤（3組目）から見た同姓');
+  eq(labels[1].sameSurnameGroupIds.join(','), '', '同姓のいない組');
 });
 
 test('ラベルに前席オプションの印が付く（画面のストライプ表示に使う）', function () {
