@@ -319,6 +319,7 @@
   var WINDOW_PENALTY = 0.3; // おひとり様が窓側でないことへの減点（列の前後より弱くしてある）
 
   var WINDOW_ANCHOR = 0.5; // 窓側を空けて通路側に寄ることへの減点
+  var ORPHAN_PENALTY = 1.5; // まっさらな2人掛けを崩して「ぽつんと1席」を作ることへの減点
 
   /**
    * 窓側を空けたまま通路側に寄っていないか。
@@ -726,11 +727,12 @@
       // 前から詰めるのが基本ですが、1〜2列うしろへずらすだけで理想のかたちに収まるなら、
       // そちらを選びます（列を下げるぶんは ROW_PENALTY で割り引きます）。
       var lookahead = day.noLookahead ? 0 : ROW_LOOKAHEAD;
-      // 席が窮屈なとき（相席あり）は、うしろにずらすと残った空席が
-      // 行き場を失い、大きな組が泣き別れになります。
-      // 「残す空席を、あとから来る組が使える」ときだけずらします。
-      // 席にゆとりがあるときは、この心配がないので気にしません
-      var smallestLeft = sharing() ? opt.smallestRemaining : 1;
+      // うしろにずらすと、その列に空席を残すことになります。
+      // 残した空席は、あとから来る「おひとり様・お2人」のお客様が前から埋めていきます
+      //（申し込み順にブロックを落として、すき間を小さい組が埋めていくイメージ）。
+      // 埋めきれないぶんまで空けると、大きな組の置き場がなくなって泣き別れになります。
+      // 席にゆとりがあるときは、この心配がいりません
+      var fillerLeft = sharing() ? (opt.fillerRemaining || 0) : 99;
       var overall = null;
       var firstHit = -1;
       for (var ri = 0; ri < rows.length; ri++) {
@@ -738,9 +740,9 @@
         // まだ誰も座っていない列を飛ばしてまで、形を整えることはしない。
         // 前の列を丸ごと空けてしまうと、いちばん良い席が遊んでしまうため
         if (firstHit >= 0 && ri > firstHit && isEmptyRow(rows[ri - 1])) break;
-        // 残していく空席を、あとから来る組が使えないなら、ずらさない
+        // 残していく空席が、あとから来る小さい組で埋まりきらないなら、ずらさない
         if (firstHit >= 0 && ri > firstHit &&
-            !(smallestLeft && smallestLeft <= freeSeatsInRow(rows[ri - 1]))) break;
+            freeSeatsInRow(rows[ri - 1]) > fillerLeft) break;
         var r0 = rows[ri];
         if (opt.frontOnly && r0 > FRONT_ROWS) continue;
         if (opt.origin && r0 !== opt.origin.row) continue;
@@ -786,11 +788,15 @@
                 var planned = planMembers(sh.seats, opt.members, count, opt.groupId);
                 if (!planned) continue;
 
-                var score = WIDTH_PENALTY[w] + h * 0.4 + sh.waste * 0.6 + sh.cut * 0.15 +
+                // 横幅の好みは2人以上の話。おひとり様に効かせると、
+                // ぽつんと空いた1席（幅1）を避けてしまい、すき間が埋まりません
+                var widthPen = count === 1 ? 0 : WIDTH_PENALTY[w];
+                var score = widthPen + h * 0.4 + sh.waste * 0.6 + sh.cut * 0.15 +
                   aislePenalty(sh.seats, lastRow) +
                   idealBonus(count, sh.seats) +
                   windowPenalty(count, sh.seats, lastRow) +
                   aisleSidePenalty(sh.seats, lastRow) +
+                  orphanPenalty(sh.seats, count) +
                   (opt.group ? genderHint(sh.seats, opt.group) : 0);
                 if (!best || score < best.score - 1e-9 ||
                     (Math.abs(score - best.score) < 1e-9 && c0 < best.c0)) {
@@ -934,6 +940,32 @@
     }
 
     // 探す列の順番。ふつうは前から。移動のときは指定の列から後ろへ、なければ前へ戻る。
+    /**
+     * 空いている2人掛けを、片方だけ使って「ぽつんと1席」を作っていないか。
+     *
+     * すき間は、あとから来るおひとり様・お2人のお客様が埋めていきます。
+     * そのとき、すでに片側がふさがっている席から埋めてもらえば、
+     * 空きはきれいにつながったまま残ります。
+     * まっさらな2人掛けを崩すと、使いみちのない1席が散らばって、
+     * 大きなグループの置き場がなくなります。
+     */
+    function orphanPenalty(cells, count) {
+      // すき間を埋める側（おひとり様・お2人）だけの決まりです。
+      // 大きい組は、かたちのほうを優先します
+      if (count > FILLER_SIZE) return 0;
+      var inBlock = {};
+      cells.forEach(function (c) { inBlock[c.id] = true; });
+      var penalty = 0;
+      cells.forEach(function (c) {
+        if (c.row === lastRow) return; // 最後部列は2人掛けではない
+        var mate = at(c.row, c.col % 2 === 1 ? c.col + 1 : c.col - 1);
+        if (!mate || mate.isCrew) return;
+        if (inBlock[mate.id]) return;  // 同じグループで使うので、ぽつんとは残らない
+        if (!taken(mate)) penalty += ORPHAN_PENALTY;
+      });
+      return penalty;
+    }
+
     /** その列の、空いているお客様用の席数 */
     function freeSeatsInRow(row) {
       var n = 0;
@@ -1010,7 +1042,7 @@
         var rest = g.members.slice(placedCount);
         var base = {
           groupId: g.id, group: g, members: rest,
-          fromRow: opt.fromRow, smallestRemaining: opt.smallestRemaining
+          fromRow: opt.fromRow, fillerRemaining: opt.fillerRemaining
         };
         var pick = null;
 
@@ -1272,14 +1304,6 @@
     // （前3列のなかでの並びは、日ごとに順ぐりにずらします）
     if (opt.reversed) restGroups = restGroups.slice().reverse();
 
-    // 申し込み順どおりだと詰め切れない構成のための、もうひとつの並べ方。
-    // 大きい組から先に置くと、大きなかたまりの置き場を先に確保できます
-    //（日ごとの入れかえは、大きい順と小さい順を入れかえることで作ります）
-    if (opt.sizeOrder) {
-      restGroups = restGroups.slice().sort(function (a, b) {
-        return opt.reversed ? a.size - b.size : b.size - a.size;
-      });
-    }
 
     // 後方をご希望の組は、いちばん最後に置きます。前から詰めていくので、
     // 結果としてほかのお客様のうしろになります。
@@ -1304,13 +1328,14 @@
     day.groupOrder = ordered.map(function (g) { return g.id; });
 
     ordered.forEach(function (g, gi) {
-      var smallest = 0;
+      // このあとに控えている「すき間を埋められる小さい組」の人数の合計
+      var filler = 0;
       for (var gj = gi + 1; gj < ordered.length; gj++) {
-        if (!smallest || ordered[gj].size < smallest) smallest = ordered[gj].size;
+        if (ordered[gj].size <= FILLER_SIZE) filler += ordered[gj].size;
       }
       placer.placeGroup(g, {
         frontCapacity: frontCapacity,
-        smallestRemaining: smallest
+        fillerRemaining: filler
       }).forEach(function (w) { warnings.push(w); });
     });
 
@@ -1453,11 +1478,12 @@
     return penalty;
   }
 
-  var REAR_STAY_PENALTY = 8; // 2日つづけて後方に座ってしまったグループ1組ぶんの減点
+  var REAR_STAY_PENALTY = 16; // 2日つづけて後方に座ってしまったグループ1組ぶんの減点
   var REVERSE_MISS = 4;      // 前後反転をあきらめることへの減点
   var REAR_ROWS = 2;         // うしろから何列ぶんを「後方」とみなすか
   var START_DRIFT = 1;       // 目標の開始位置から1組ぶんずれることへの減点
   var OFF_SHAPE = 2;         // 理想のかたちに収まらなかったグループ1組ぶんの減点
+  var FILLER_SIZE = 2;       // すき間を埋めてもらえる組の大きさ（おひとり様・お2人まで）
 
   /** そのグループが座っている、いちばん前の列 */
   function frontRowOf(day, groupId) {
@@ -1528,10 +1554,8 @@
   function buildBestDay(layout, groups, opt, target, rotatingCount) {
     // 試す並べ方。うしろにいくほど「ふつうでない」ので、同じ出来ばえなら先のものが選ばれます
     var WAYS = [
-      { noLookahead: false, sizeOrder: false }, // 申し込み順・かたち優先
-      { noLookahead: true, sizeOrder: false },  // 申し込み順・前から詰める
-      { noLookahead: false, sizeOrder: true },  // 大きい組から・かたち優先
-      { noLookahead: true, sizeOrder: true }    // 大きい組から・前から詰める
+      { noLookahead: false }, // かたちを整えるために、1列うしろにずらすことを許す
+      { noLookahead: true }   // ずらさず、ひたすら前から詰める
     ];
 
     function make(startIndex, reversed, way) {
@@ -1541,8 +1565,7 @@
         frontStartIndex: opt.frontStartIndex,
         reversed: reversed,
         sharing: opt.sharing,
-        noLookahead: way.noLookahead,
-        sizeOrder: way.sizeOrder
+        noLookahead: way.noLookahead
       });
       return repackSplits(layout, groups, opt, day);
     }
