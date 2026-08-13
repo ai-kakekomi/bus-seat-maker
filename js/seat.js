@@ -423,7 +423,7 @@
       // どちらも「4席の列」を前提にした理想のかたちが当てはまらないので数えません
       //（5名がぴったり収まる最後部列を「崩れている」と言われても困るため）
       if (b.row0 <= CREW_ROW) return false;
-      if (day.lastRow && b.row1 >= day.lastRow) return false;
+      if (day.lastRow && b.row0 === day.lastRow) return false;
       return (b.col1 - b.col0 + 1) !== want.w || (b.row1 - b.row0 + 1) !== want.h;
     });
   }
@@ -733,10 +733,14 @@
       // 埋めきれないぶんまで空けると、大きな組の置き場がなくなって泣き別れになります。
       // 席にゆとりがあるときは、この心配がいりません
       var fillerLeft = sharing() ? (opt.fillerRemaining || 0) : 99;
+      // すき間（中途半端に空いた列）は、あとから来るおひとり様・お2人の領分です。
+      // 大きい組はそこに無理やり入らず、まっさらな列まで進んでかまいません
+      //（テトリスで、大きなブロックがでこぼこを飛ばして落ちるのと同じ考え方）。
+      var isFiller = count <= FILLER_SIZE;
       var overall = null;
       var firstHit = -1;
       for (var ri = 0; ri < rows.length; ri++) {
-        if (firstHit >= 0 && ri - firstHit > lookahead) break;
+        if (firstHit >= 0 && isFiller && ri - firstHit > lookahead) break;
         // まだ誰も座っていない列を飛ばしてまで、形を整えることはしない。
         // 前の列を丸ごと空けてしまうと、いちばん良い席が遊んでしまうため
         if (firstHit >= 0 && ri > firstHit && isEmptyRow(rows[ri - 1])) break;
@@ -766,16 +770,21 @@
               if (opt.origin && c0 !== opt.origin.col) continue;
               var full = rectSeats(r0, c0, w, h);
               if (!full) continue;
-              // 業務席は「はじめから無い席」として、四角から取り除いて考えます。
-              // こうしないと、最前列の2席とその次の列をひとまとめにした形
-              //（6名なら 前に2席＋次の列に4席）が作れません。
+              // 四角のなかの「使えない席」（業務席・すでに座っている席）は、
+              // はじめから無い席として取り除いて考えます。
+              // こうしないと、すでにあるかたまりに寄り添う形が作れません。
+              // 例：4席×2列の枠の左上2席がふさがっていても、
+              // 残る6席は6名グループの本来のかたち（横一列4席＋2席）になります。
               var forced = {};
-              var busy = false;
+              var freeCells = 0;
               for (var i = 0; i < full.length; i++) {
-                if (full[i].isCrew) { forced[Math.floor(i / w) + ',' + (i % w)] = true; continue; }
-                if (taken(full[i], opt.ignoreBlocked)) { busy = true; break; }
+                if (full[i].isCrew || taken(full[i], opt.ignoreBlocked)) {
+                  forced[Math.floor(i / w) + ',' + (i % w)] = true;
+                } else {
+                  freeCells++;
+                }
               }
-              if (busy) continue;
+              if (freeCells < count) continue;
 
               // 候補の形（そのままの四角／角を欠けさせたL字）
               var shapes = shapeCandidates(full, w, h, count, allowPad,
@@ -811,7 +820,9 @@
         }
         if (best) {
           if (firstHit < 0) firstHit = ri;
-          var adjusted = best.score + (ri - firstHit) * ROW_PENALTY;
+          // 大きい組がすき間を飛ばすのは自然なことなので、ほとんど減点しません
+          var perRow = isFiller ? ROW_PENALTY : 0.05;
+          var adjusted = best.score + (ri - firstHit) * perRow;
           if (!overall || adjusted < overall.adjusted - 1e-9) {
             best.adjusted = adjusted;
             overall = best;
@@ -1405,24 +1416,103 @@
     return (want - seated) * 10000 + split * 100 + mixed * 5 + odd + offShape * OFF_SHAPE;
   }
 
-  /** 分かれてしまった組を先に置き直して、解けるかどうかもう一度試す */
+  var REPACK_STEPS = 3; // 入りきらなかった組を、何組ぶん前まで繰り上げて試すか
+
+  /**
+   * 仕上げ。かたちが崩れてしまった組を少しだけ前に繰り上げて、直らないか試します。
+   *
+   * テトリスと同じで、大きなブロックが先に落ちたほうがきれいに収まることがあります。
+   * 例：6名の組はあまりが2席、5名の組はあまりが1席と2席。
+   * この2つが隣り合うと、あまりどうしが打ち消し合ってぴったり収まります。
+   * 申し込み順のままだと間に別の組がはさまって、それができないことがあります。
+   *
+   * 探索のたびに走らせると遅いので、いちばんよい1日ぶんが決まってから1回だけ行います。
+   */
+  function polishShapes(layout, groups, opt, day) {
+    var odd = nonIdealGroups(groups, day);
+    if (odd.length === 0) return day;
+
+    var best = day;
+    var bestScore = dayScore(groups, day);
+
+    odd.slice(0, POLISH_GROUPS).forEach(function (g) {
+      var base = best.groupOrder.slice();
+      var from = base.indexOf(g.id);
+      if (from < 0) return;
+      for (var step = 1; step <= REPACK_STEPS && from - step >= 0; step++) {
+        var order = base.slice();
+        order.splice(from, 1);
+        order.splice(from - step, 0, g.id);
+        var retry = assignDay(layout, groups, {
+          startIndex: day.startIndex,
+          frontStartIndex: day.frontStartIndex,
+          reversed: day.reversed,
+          sharing: opt.sharing,
+          noLookahead: day.noLookahead,
+          orderOverride: order
+        });
+        var sc = dayScore(groups, retry);
+        if (sc < bestScore) { best = retry; bestScore = sc; }
+      }
+    });
+    return best;
+  }
+
+  var POLISH_GROUPS = 3; // 仕上げで動かしてみる組の数の上限
+
+  /**
+   * 入りきらなかった組を、置く順番を変えてもう一度試す。
+   *
+   * 申し込み順に落としていくと、大きな組が終盤にいる構成では
+   * そのころにまとまった空きが残っていません（テトリスの限界）。
+   * このとき順番を崩しますが、<strong>崩し方はできるだけ小さく</strong>します。
+   * いきなり先頭まで引き上げると、申し込みの早いお客様が後ろに回されて不自然になるためです。
+   *
+   * 手順：入りきらなかった組を1組ぶんずつ前に繰り上げて試し、
+   * いちばん出来ばえのよいものを採ります。
+   */
   function repackSplits(layout, groups, opt, day) {
     var blockCount = {};
     day.blocks.forEach(function (b) { blockCount[b.groupId] = (blockCount[b.groupId] || 0) + 1; });
     var splitIds = Object.keys(blockCount).filter(function (gid) { return blockCount[gid] > 1; });
     if (splitIds.length === 0) return day;
 
-    var order = splitIds.concat(day.groupOrder.filter(function (id) {
-      return splitIds.indexOf(id) < 0;
-    }));
-    var retry = assignDay(layout, groups, {
-      startIndex: day.startIndex,
-      frontStartIndex: day.frontStartIndex,
-      reversed: day.reversed,
-      sharing: opt.sharing,
-      orderOverride: order
+    var best = day;
+    var bestScore = dayScore(groups, day);
+
+    function tryOrder(order) {
+      var retry = assignDay(layout, groups, {
+        startIndex: day.startIndex,
+        frontStartIndex: day.frontStartIndex,
+        reversed: day.reversed,
+        sharing: opt.sharing,
+        noLookahead: day.noLookahead,
+        orderOverride: order
+      });
+      var sc = dayScore(groups, retry);
+      if (sc < bestScore) { best = retry; bestScore = sc; }
+    }
+
+    // 入りきらなかった組を、1組ずつ前に繰り上げていく
+    splitIds.forEach(function (gid) {
+      var base = day.groupOrder.slice();
+      var from = base.indexOf(gid);
+      if (from < 0) return;
+      for (var step = 1; step <= REPACK_STEPS && from - step >= 0; step++) {
+        var order = base.slice();
+        order.splice(from, 1);
+        order.splice(from - step, 0, gid);
+        tryOrder(order);
+      }
     });
-    return dayScore(groups, retry) < dayScore(groups, day) ? retry : day;
+
+    // それでもだめなら、最後の手段として全部を先頭に引き上げる
+    if (bestScore >= 100) {
+      tryOrder(splitIds.concat(day.groupOrder.filter(function (id) {
+        return splitIds.indexOf(id) < 0;
+      })));
+    }
+    return best;
   }
 
   /**
@@ -1652,7 +1742,8 @@
       }
     }
 
-    return best;
+    // 仕上げ：かたちが崩れた組を少し前に繰り上げて、直らないか1回だけ試す
+    return polishShapes(layout, groups, opt, best);
   }
 
   function rotate(list, k) {
