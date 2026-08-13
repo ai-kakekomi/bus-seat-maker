@@ -370,8 +370,7 @@ test('相席なしのおひとり様は窓側に座る', function () {
 test('ほぼ満席の見本でも、かたちが崩れる組はごくわずかに収まる', function () {
   // 画面の見本「ほぼ満席」と同じ構成。
   // 満席でもかたちをそろえるために席をずらすようにした結果、
-  // 崩れる組は 5組 → 2組 に減りました。ここが増えたら作り直しの合図です
-  // （申し込み順で詰め切れないときは、大きい組から置く並べ方も試します）
+  // 崩れる組は 5組 → 1組 に減りました。ここが増えたら作り直しの合図です
   var base = [
     group('A', 2, { frontOption: true }), group('B', 2, { frontOption: true }),
     group('C', 3, { frontOption: true }), group('D', 4, { frontOption: true }),
@@ -389,7 +388,7 @@ test('ほぼ満席の見本でも、かたちが崩れる組はごくわずか�
     var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
     eq(r.totalPeople, 42, '人数');
     var label = withFrontD ? 'Dは前席' : 'Dの前席を外す';
-    ok(S.nonIdealGroups(r.groups, r.days[0]).length <= 2,
+    ok(S.nonIdealGroups(r.groups, r.days[0]).length <= 1,
       label + '：かたちが崩れた組が多い（' +
       S.nonIdealGroups(r.groups, r.days[0]).map(function (g) { return g.id; }).join(',') + '）');
     eq(splitGroupCount(r.days[0]), 0, label + '：分かれた組がある');
@@ -410,6 +409,34 @@ test('最後部列にぴったり収まった組を「崩れている」と言�
   ok(backRow, '5名の組が最後部列にいない');
   eq(S.nonIdealGroups(r.groups, day).filter(function (g) { return g.id === 'X'; }).length, 0,
     '最後部列の組が「かたちが崩れている」扱いになっている');
+});
+
+// テトリス方式：申し込み順にかたまりを落とし、すき間は後続の小さい組が埋める
+test('おひとり様は、片側がふさがっている席から埋める（相席ありのとき）', function () {
+  // 画面の見本「ほぼ満席」と同じ構成。1名の組が3つある
+  var groups = [
+    group('A', 2, { frontOption: true }), group('B', 2, { frontOption: true }),
+    group('C', 3, { frontOption: true }), group('D', 4, { frontOption: true }),
+    group('E', 4), group('F', 3), group('G', 5), group('H', 1), group('I', 2),
+    group('J', 3), group('K', 1), group('L', 6), group('M', 1), group('N', 5)
+  ];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  eq(r.sharing, true, '相席ありの構成になっていない');
+  var day = r.days[0];
+
+  // 誰がどの席にいるか
+  var owner = {};
+  Object.keys(day.placements).forEach(function (id) { owner[id] = day.placements[id].groupId; });
+
+  r.groups.forEach(function (g) {
+    if (g.size !== 1) return;
+    var sid = day.seatsOfGroup[g.id][0];
+    var row = seatRow(sid), col = seatCol(sid);
+    if (row === r.layout.lastRow) return; // 最後部列は2人掛けではない
+    var mate = 'r' + row + '-' + (col % 2 === 1 ? col + 1 : col - 1);
+    ok(!!owner[mate],
+      g.id + '（おひとり様）が、まっさらな2人掛けを崩している: ' + sid);
+  });
 });
 
 test('本来のかたちに収まらなかった組は、座席表の下でお知らせする', function () {
