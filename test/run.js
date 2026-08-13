@@ -394,6 +394,35 @@ test('ほぼ満席の見本は、全組が本来のかたちに収まる（テ�
   });
 });
 
+test('5名×8組＋3名の43名満席でも、離れ離れになる組は出さない', function () {
+  // 5名の組は端数が1と2の両方できるので、いちばん敷き詰めにくい構成。
+  // 本来のかたちのままでは埋まらないので、かたちを変えて端数を打ち消します
+  var groups = [];
+  for (var i = 0; i < 8; i++) groups.push(group('f' + i, 5));
+  groups.push(group('t', 3));
+  [1, 2].forEach(function (days) {
+    var r = S.assign({ layoutType: '11x45', groups: groups, days: days });
+    eq(r.totalPeople, 43, '人数');
+    r.days.forEach(function (day, di) {
+      eq(Object.keys(day.placements).length, 43, (di + 1) + '日目に座れない人がいる');
+      eq(splitGroupCount(day), 0, (di + 1) + '日目に分かれた組がある');
+    });
+  });
+});
+
+test('2名×19組＋5名の43名満席は、5名が最後部列に収まってぴったり埋まる', function () {
+  // 2名の組が最前列から順に埋まり、最後に残る最後部列の5席に5名の組が入ります
+  var groups = [group('X', 5)];
+  for (var i = 0; i < 19; i++) groups.push(group('p' + i, 2));
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  var day = r.days[0];
+  eq(Object.keys(day.placements).length, 43, '座れない人がいる');
+  eq(splitGroupCount(day), 0, '分かれた組がある');
+  day.seatsOfGroup['X'].forEach(function (sid) {
+    eq(seatRow(sid), r.layout.lastRow, '5名の組が最後部列にいない');
+  });
+});
+
 test('最後部列にぴったり収まった組を「崩れている」と言わない', function () {
   // 満席43名。5名の組が1つだけなので、最後部（5席）はその組が埋める。
   // 5席横並びは最後部列の自然なかたちなので、お知らせの対象にしない
@@ -600,15 +629,28 @@ test('5名・6名の組は、最前列2席＋次の列で本来のかたちに�
   });
 });
 
-test('最前列に3名・4名が来たら、横一列を崩して入れる（空けたままにしない）', function () {
+test('最前列に3名・4名は入らないので、最前列は空けたまま次の列へ送る', function () {
+  // 最前列はお客様が座れるのが2席だけ。3名・4名の本来のかたちは横一列なので、
+  // ここに詰め込むとかたちが崩れます。テトリスと同じで、置けない列は飛ばします
   [3, 4].forEach(function (size) {
     var r = S.assign({ layoutType: '11x45', groups: [group('g1', size)], days: 1 });
     var day = r.days[0];
-    eq(blocksOf(day, 'g1')[0].row0, 1, size + '名が最前列を空けて後ろに回っている');
-    // 崩した形になるが、最前列では作れないのでお知らせは出さない
+    var b = blocksOf(day, 'g1')[0];
+    eq(b.row0, 2, size + '名が最前列に詰め込まれている');
+    eq(b.row0, b.row1, size + '名が横一列になっていない');
+    // 本来のかたちに収まっているので、お知らせは出さない
     eq(day.warnings.filter(function (w) { return w.type === 'shape-differs'; }).length, 0,
       size + '名で余計なお知らせが出ている');
   });
+});
+
+test('最前列の2席にも、かたちを崩さず入れる組なら入れる（5名の 2＋3）', function () {
+  // 5名の本来のかたちは「正方形＋通路をまたいで1」。前後どちらに寄せるかは区別しないので、
+  // 最前列2席＋次の列3席も本来のかたちです。入れるなら最前列から使います
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 5)], days: 1 });
+  var rows = r.days[0].seatsOfGroup['g1'].map(seatRow);
+  eq(Math.min.apply(null, rows), 1, '5名が最前列を空けている');
+  eq(S.nonIdealGroups(r.groups, r.days[0]).length, 0, '本来のかたちに収まっていない');
 });
 
 test('窓側から埋める（通路側だけ使って窓側を空けない）', function () {
@@ -629,7 +671,8 @@ test('最前列の2席は、前席をご希望の2名の組にゆずる', functi
   var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
   var day = r.days[0];
 
-  eq(day.groupOrder[0], 'pair', '2名の組から置いていない');
+  // 申し込み順は変えません。3名の組は最前列に入らないので次の列へ送られ、
+  // 空いたままの最前列2席に、あとから来た2名の組がぴったり収まります
   var pairRows = day.seatsOfGroup['pair'].map(seatRow);
   eq(Math.min.apply(null, pairRows), 1, '2名の組が最前列にいない');
   eq(Math.max.apply(null, pairRows), 1, '2名の組が最前列からはみ出している');
@@ -1281,7 +1324,8 @@ test('ずらした日も前から詰める（後方に空白の島を作らな�
   var r = S.assign({ layoutType: '11x45', groups: groups, days: 2 });
   r.days.forEach(function (day, di) {
     var rows = occupiedRows(day);
-    eq(rows[0], 1, (di + 1) + '日目が1列目から始まっていない');
+    // 4名の横一列は最前列（お客様は2席）に入らないので、最前列は空けたまま2列目から
+    eq(rows[0], 2, (di + 1) + '日目が2列目から始まっていない');
     // 使っている列が飛び飛びになっていないこと
     for (var i = 1; i < rows.length; i++) {
       eq(rows[i], rows[i - 1] + 1, (di + 1) + '日目の' + rows[i - 1] + '列目と' + rows[i] + '列目のあいだが空いている');

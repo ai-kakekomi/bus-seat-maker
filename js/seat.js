@@ -2554,6 +2554,583 @@
    *   useRealName: boolean
    * }
    */
+  /* =========================================================
+   * テトリス方式の配置（逐次）
+   *
+   * これは上の「候補を点数で選ぶ」やり方とは別の、独立した配置エンジンです。
+   * 現場の手順そのままに、つぎの順で組み立てます。
+   *
+   *   ① 申し込み順（2日目は逆順）に、理想のかたちのまま前から落としていく
+   *      ・その列に入らなければ、次の列へ送る（前の列は空いたまま）
+   *      ・おひとり様・お2人は、前の列に残った端数を先に埋める
+   *   ② 全員入れば、そこで終わり（点数も探索も使いません）
+   *   ③ あふれたら、端数を打ち消し合う組どうしを入れ替える
+   *   ④ それでも入らなければ、かたちを変える（3名→L字／5名→横一列4＋1）
+   *
+   * 最後部列は最終手段なので、①〜③では使いません。
+   * ======================================================= */
+
+  /** 人数から「列ごとの人数」を出す。配列の先頭が前の列 */
+  function tetrisParts(size, alt) {
+    if (alt) {
+      if (size === 3) return [2, 1];        // L字
+      if (size === 5) return [ROW_SEATS, 1]; // 横一列4＋1
+    }
+    if (size <= ROW_SEATS) return [size];
+    if (size === 5) return [3, 2];
+    if (size === 6) return [ROW_SEATS, 2];
+    var h = Math.ceil(size / ROW_SEATS);
+    var parts = [];
+    for (var i = 0; i < h - 1; i++) parts.push(ROW_SEATS);
+    parts.push(size - ROW_SEATS * (h - 1));
+    return parts;
+  }
+
+  /** その列で、k席ぶん横につながって空いているところを全部出す */
+  function tetrisRanges(free, row, k, lastRow) {
+    var maxCol = row === lastRow ? 5 : ROW_SEATS;
+    var out = [];
+    for (var c = 1; c + k - 1 <= maxCol; c++) {
+      var ok = true;
+      var cols = [];
+      for (var j = 0; j < k; j++) {
+        if (!free[row + ',' + (c + j)]) { ok = false; break; }
+        cols.push(c + j);
+      }
+      if (!ok) continue;
+      // お2人が通路をまたぐのは泣き別れ扱い（col2とcol3のあいだが通路）
+      if (row !== lastRow && k === 2 && c === 2) continue;
+      out.push(cols);
+    }
+    return out;
+  }
+
+  /** となり（同じ2人掛けの相方）の席番号。最後部列は通路がないので左右そのまま */
+  function tetrisPartners(row, col, lastRow) {
+    if (row === lastRow) return [col - 1, col + 1].filter(function (c) { return c >= 1 && c <= 5; });
+    return [col % 2 === 1 ? col + 1 : col - 1];
+  }
+
+  /**
+   * 同じ列のなかで、どこに寄せるかの好み（小さいほど先に試す）。
+   * 探索ではなく、同じ列のなかでの寄せ方を決めるだけの決まりです。
+   */
+  function tetrisRank(free, taken, row, cols, lastRow, sharing) {
+    var c0 = cols[0];
+    if (cols.length === 1) {
+      var isWindow = row === lastRow ? (c0 === 1 || c0 === 5) : (c0 === 1 || c0 === ROW_SEATS);
+      var fills = tetrisPartners(row, c0, lastRow).some(function (c) {
+        return taken[row + ',' + c];
+      });
+      // 相席ありのときは、まず端数を埋める。相席なしのときは窓側
+      if (sharing) return (fills ? 0 : 20) + (isWindow ? 0 : 5) + c0;
+      return (isWindow ? 0 : 20) + c0;
+    }
+    // 2席以上は、2人掛けの左から始まるかたち（col1・col3）を先に
+    var aligned = row === lastRow ? 0 : (c0 % 2 === 1 ? 0 : 10);
+    return aligned + c0;
+  }
+
+  /**
+   * その人数の「分け方」を、良い順に並べて出す。
+   * 先頭が本来のかたち、つぎが代わりのかたち（3名→L字／5名→横一列4＋1）、
+   * そのあとが、端数を打ち消すためのそれ以外の分け方（列数の少ない順）。
+   */
+  function tetrisShapeVariants(size) {
+    var out = [tetrisParts(size, false)];
+    var alt = tetrisParts(size, true);
+    if (alt.join() !== out[0].join()) out.push(alt);
+
+    var comps = [];
+    (function build(rem, acc) {
+      if (comps.length > 400 || acc.length > 6) return;
+      if (rem === 0) { comps.push(acc.slice()); return; }
+      // 5席の分け方は、最後部列（5席横並び）でしか使えません
+      for (var k = Math.min(5, rem); k >= 1; k--) {
+        acc.push(k);
+        build(rem - k, acc);
+        acc.pop();
+      }
+    })(size, []);
+    // 最後部列を使うかたちは最終手段。あとは列数が少なく、前の列に多く座るかたちを先に
+    function big(p) { return p.some(function (k) { return k > ROW_SEATS; }) ? 1 : 0; }
+    comps.sort(function (a, b) {
+      if (big(a) !== big(b)) return big(a) - big(b);
+      if (a.length !== b.length) return a.length - b.length;
+      for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return b[i] - a[i];
+      return 0;
+    });
+
+    var seen = {};
+    var list = [];
+    out.concat(comps).forEach(function (p) {
+      var key = p.join(',');
+      if (seen[key]) return;
+      seen[key] = true;
+      list.push(p);
+    });
+    return list.slice(0, 80);
+  }
+
+  /**
+   * 本来のかたちと、それを前後ひっくり返しただけのかたち。
+   * 前に寄せるか後ろに寄せるかは区別しないので、どちらも「本来のかたち」です。
+   */
+  function tetrisIdealVariants(size) {
+    var ideal = tetrisParts(size, false);
+    var flipped = ideal.slice().reverse();
+    return ideal.join() === flipped.join() ? [ideal] : [ideal, flipped];
+  }
+
+  var TETRIS_VARIANTS = {};
+  function tetrisVariants(size) {
+    if (!TETRIS_VARIANTS[size]) TETRIS_VARIANTS[size] = tetrisShapeVariants(size);
+    return TETRIS_VARIANTS[size];
+  }
+
+  /** 1組ぶんを、r列目から落としてみる。置ければ席の一覧を返す */
+  function tetrisFit(layout, state, parts, r, loose) {
+    var lastRow = layout.lastRow;
+    var chosen = [];
+
+    function step(i, prevCols, prevRow) {
+      if (i >= parts.length) return true;
+      var row = r + i;
+      if (row > state.limitRow) return false;
+      var cands = tetrisRanges(state.free, row, parts[i], lastRow);
+      if (prevCols) {
+        var prevTracks = {};
+        prevCols.forEach(function (c) { prevTracks[trackOf(layout, prevRow, c)] = true; });
+        var need = loose ? 1 : Math.min(parts[i], prevCols.length);
+        cands = cands.filter(function (cols) {
+          var hit = 0;
+          cols.forEach(function (c) { if (prevTracks[trackOf(layout, row, c)]) hit++; });
+          return hit >= need;
+        });
+      }
+      cands.sort(function (a, b) {
+        return tetrisRank(state.free, state.taken, row, a, lastRow, state.sharing) -
+          tetrisRank(state.free, state.taken, row, b, lastRow, state.sharing);
+      });
+      for (var n = 0; n < cands.length; n++) {
+        chosen[i] = { row: row, cols: cands[n] };
+        if (step(i + 1, cands[n], row)) return true;
+      }
+      chosen.length = i;
+      return false;
+    }
+
+    return step(0, null, 0) ? chosen.slice() : null;
+  }
+
+  /**
+   * 1組ぶんを実際に置く。置けなければ false。
+   *
+   * まず本来のかたちで、前の列から順に落とせる場所をさがします。
+   * どこにも落ちなければ、かたちを変えて（3名→L字、5名→横一列4＋1、
+   * それでも入らなければ他の分け方で）端数を打ち消しにいきます。
+   */
+  function tetrisPlace(layout, state, group) {
+    var maxRow = group.frontOption ? Math.min(FRONT_ROWS, state.limitRow) : state.limitRow;
+    var variants = tetrisVariants(group.size);
+    // 端数を打ち消すために、この組だけかたちを決め打ちしている場合
+    var forced = state.alt[group.id];
+    if (forced) {
+      variants = [forced].concat(variants.filter(function (p) {
+        return p.join() !== forced.join();
+      }));
+    }
+
+    var got = null;
+
+    // まず、本来のかたちのまま置ける、いちばん前の場所をさがします。
+    // 前後どちらに寄せるかは区別しないので（5名なら 3＋2 も 2＋3 も本来のかたち）、
+    // 最前列の2席のように狭い列でも、かたちを崩さずに使えるなら使います。
+    // 逆に3名を最前列に入れるとL字に崩れてしまうので、そのときは最前列を空けたまま次の列へ送ります。
+    if (!forced) {
+      var ideals = tetrisIdealVariants(group.size);
+      for (var ir = 1; ir + 0 <= maxRow && !got; ir++) {
+        for (var iv = 0; iv < ideals.length && !got; iv++) {
+          if (ir + ideals[iv].length - 1 > maxRow) continue;
+          got = tetrisFit(layout, state, ideals[iv], ir, false);
+        }
+      }
+      if (got) { tetrisCommit(layout, state, group, got); return true; }
+    }
+
+    // 席がぎゅうぎゅうのときは、前の列に空きを残さない置き方を先に試します
+    // （テトリスで、すき間を上に残したまま次のブロックを置かないのと同じ考え方）
+    if (state.tight) {
+      for (var tv = 0; tv < variants.length && !got; tv++) {
+        got = tetrisDrop(layout, state, variants[tv], maxRow, false, true);
+      }
+    }
+    for (var v = 0; v < variants.length && !got; v++) {
+      got = tetrisDrop(layout, state, variants[v], maxRow, false);
+    }
+    // それでもだめなら、前後のそろえ方をゆるめる
+    for (var v2 = 0; v2 < variants.length && !got; v2++) {
+      got = tetrisDrop(layout, state, variants[v2], maxRow, true);
+    }
+    if (got) tetrisCommit(layout, state, group, got);
+    return !!got;
+  }
+
+  /** その分け方で落とせる、いちばん前の場所をさがす */
+  function tetrisDrop(layout, state, parts, maxRow, loose, noGapAbove) {
+    for (var r = 1; r + parts.length - 1 <= maxRow; r++) {
+      if (noGapAbove) {
+        var gap = false;
+        for (var q = 1; q < r && !gap; q++) {
+          var cols = q === layout.lastRow ? 5 : ROW_SEATS;
+          for (var c = 1; c <= cols; c++) if (state.free[q + ',' + c]) { gap = true; break; }
+        }
+        if (gap) return null; // これより前に空きが残るので、この分け方では置けない
+      }
+      var got = tetrisFit(layout, state, parts, r, loose);
+      if (got) return got;
+    }
+    return null;
+  }
+
+  /** 決まった席を、実際に埋める */
+  function tetrisCommit(layout, state, group, got) {
+    {
+      got.forEach(function (part) {
+        part.cols.forEach(function (c) {
+          var key = part.row + ',' + c;
+          delete state.free[key];
+          state.taken[key] = true;
+          state.day.placements['r' + part.row + '-' + c] = { groupId: group.id, gender: 'unknown' };
+        });
+      });
+      // 相席なしのときは、はみ出す2人掛けの相方を空けておく
+      if (!state.sharing) {
+        got.forEach(function (part) {
+          part.cols.forEach(function (c) {
+            tetrisPartners(part.row, c, layout.lastRow).forEach(function (p) {
+              var key = part.row + ',' + p;
+              if (!state.free[key]) return;
+              delete state.free[key];
+              state.day.blocked['r' + part.row + '-' + p] = group.id;
+            });
+          });
+        });
+      }
+    }
+  }
+
+  /**
+   * 最後の手段。空いている席を前から拾って座っていただく。
+   * ここに来るのは席がほぼ埋まりきったときだけで、泣き別れの注意が出ます。
+   */
+  function tetrisScatter(layout, state, group) {
+    var need = group.size;
+    var picked = [];
+    for (var r = 1; r <= state.limitRow && picked.length < need; r++) {
+      var cols = r === layout.lastRow ? [1, 2, 3, 4, 5] : [1, 2, 3, 4];
+      for (var i = 0; i < cols.length && picked.length < need; i++) {
+        var key = r + ',' + cols[i];
+        if (state.free[key]) picked.push({ row: r, cols: [cols[i]] });
+      }
+    }
+    if (picked.length < need) return false;
+    tetrisCommit(layout, state, group, picked);
+    return true;
+  }
+
+  /** 順番どおりに全部落とす（1回ぶん） */
+  function tetrisRun(layout, groups, order, opt) {
+    var day = {
+      startIndex: opt.startIndex || 0,
+      frontStartIndex: opt.frontStartIndex || 0,
+      reversed: !!opt.reversed,
+      shifted: !!(opt.startIndex || opt.frontStartIndex || opt.reversed),
+      sharing: opt.sharing,
+      tetris: true,
+      idealFeasible: opt.idealFeasible,
+      placements: {},
+      reserved: {},
+      blocked: {},
+      warnings: []
+    };
+    var state = {
+      day: day,
+      free: {},
+      taken: {},
+      sharing: opt.sharing !== false,
+      alt: opt.alt || {},
+      tight: !!opt.tight,
+      limitRow: opt.limitRow || layout.lastRow
+    };
+    layout.seats.forEach(function (s) {
+      if (!s.isCrew) state.free[s.row + ',' + s.col] = true;
+    });
+
+    var warnedFront = false;
+    var frontCapacity = layout.seats.filter(function (x) {
+      return !x.isCrew && x.row <= FRONT_ROWS;
+    }).length;
+
+    var missed = [];
+    order.forEach(function (g) {
+      if (tetrisPlace(layout, state, g)) return;
+      // 前席オプションで前3列に入らなかった組は、その場で（順番を崩さずに）
+      // うしろの列も使って置き直します。あとに回すと最後尾まで飛ばされてしまうためです
+      if (g.frontOption) {
+        var relaxed = { id: g.id, order: g.order, size: g.size, frontOption: false };
+        if (tetrisPlace(layout, state, relaxed)) {
+          if (!warnedFront) {
+            warnedFront = true;
+            day.warnings.push({
+              type: 'front-overflow', level: 'warn', groupId: g.id,
+              message: '前のお席をご希望のグループが多いため、前から3列目まで（お客様が座れるのは' +
+                frontCapacity + '席）に収まりませんでした。お客様' + alpha(g.order + 1) +
+                '（' + g.size + '名）は4列目以降になります。'
+            });
+          }
+          return;
+        }
+      }
+      missed.push(g);
+    });
+
+    var stillMissed = missed;
+
+    // 最後の手段。かたちを問わず、空いている席に座っていただく（泣き別れになります）
+    stillMissed = stillMissed.filter(function (g) {
+      return !tetrisScatter(layout, state, g);
+    });
+
+    stillMissed.forEach(function (g) {
+      day.warnings.push({
+        type: 'no-seat', level: 'error', groupId: g.id,
+        message: 'お客様' + alpha(g.order + 1) + '（' + g.size + '名）の席が足りませんでした。'
+      });
+    });
+
+    day.missedCount = stillMissed.length;
+    day.groupOrder = order.map(function (g) { return g.id; });
+    return refreshDay(layout, day);
+  }
+
+  /** 出来ばえ。小さいほど良い（あぶれない ＞ 本来のかたち ＞ 最後部列を使わない） */
+  function tetrisScore(layout, groups, day) {
+    var want = groups.reduce(function (a, g) { return a + g.size; }, 0);
+    var seated = Object.keys(day.placements).length;
+    var rear = 0;
+    Object.keys(day.placements).forEach(function (sid) {
+      if (sid.indexOf('r' + layout.lastRow + '-') === 0) rear = 1;
+    });
+    var blockCount = {};
+    (day.blocks || []).forEach(function (b) {
+      blockCount[b.groupId] = (blockCount[b.groupId] || 0) + 1;
+    });
+    var split = 0;
+    Object.keys(blockCount).forEach(function (gid) {
+      if (blockCount[gid] > 1) split += blockCount[gid] - 1;
+    });
+    return (want - seated) * 10000 + split * 100 +
+      nonIdealGroups(groups, day).length * 10 + rear * 3;
+  }
+
+  /** 並べる順番を作る。前席組 → 通常組 → 後方ご希望の組。2日目以降は逆順 */
+  function tetrisOrder(groups, opt) {
+    var front = groups.filter(function (g) { return g.frontOption; });
+    var rear = groups.filter(function (g) { return g.rearOption; });
+    var rest = groups.filter(function (g) { return !g.frontOption && !g.rearOption; });
+    front = rotate(front, opt.frontStartIndex || 0);
+    rest = rotate(rest, opt.startIndex || 0);
+    if (opt.reversed) {
+      front = front.slice().reverse();
+      rest = rest.slice().reverse();
+    }
+    return front.concat(rest).concat(rear);
+  }
+
+  /**
+   * テトリス方式で1日ぶんを組む。
+   * ①そのまま落とす → ②最後部列も解放 → ③入れ替え → ④かたちを変える
+   */
+  function tetrisAssignDay(layout, groups, opt) {
+    opt = opt || {};
+    var sharing = opt.sharing !== false;
+    var base = tetrisOrder(groups, opt);
+
+    function run(order, alt, limitRow, tight) {
+      return tetrisRun(layout, groups, order, {
+        startIndex: opt.startIndex, frontStartIndex: opt.frontStartIndex,
+        reversed: opt.reversed, sharing: sharing, alt: alt,
+        limitRow: limitRow, tight: tight, idealFeasible: opt.idealFeasible
+      });
+    }
+
+    // 「ふつうに前から落とす」やり方と、「前の列にすき間を残さない」やり方の
+    // 両方で最後まで組んでみて、出来のよいほうを採ります。
+    // （前者は空いているバスで自然な形になり、後者はぎゅうぎゅうのときに敷き詰まります）
+    var solvedA = tetrisSolve(layout, groups, base, run, false);
+    var best = solvedA.day;
+    if (solvedA.score >= 10) {
+      var solvedB = tetrisSolve(layout, groups, base, run, true);
+      if (solvedB.score < solvedA.score) best = solvedB.day;
+    }
+
+    return tetrisFinish(layout, groups, best);
+  }
+
+  var TETRIS_BUDGET = 400; // 見直しに使ってよい試行回数（どうにもならない構成で粘りすぎないため）
+
+  /** ①〜⑤の手順を、指定のやり方で最後まで通す */
+  function tetrisSolve(layout, groups, base, rawRun, tight) {
+    var budget = TETRIS_BUDGET;
+    function run(o, a, l, t) {
+      budget--;
+      return rawRun(o, a, l, t);
+    }
+    var alt = {};
+    var order = base.slice();
+    var best = run(order, alt, layout.lastRow - 1, tight);
+    var bestScore = tetrisScore(layout, groups, best);
+
+    // ② 最後部列は最終手段。あぶれた人がいるときだけ解放する
+    var limitRow = layout.lastRow - 1;
+    if (bestScore >= 10) {
+      var withRear = run(order, alt, layout.lastRow, tight);
+      var rearScore = tetrisScore(layout, groups, withRear);
+      if (rearScore < bestScore) {
+        best = withRear; bestScore = rearScore; limitRow = layout.lastRow;
+      }
+    }
+
+    // ③ 端数を打ち消すために、組の順番を入れ替える。
+    //    となりと入れ替えるだけでなく、収まらなかった組は前のほうへ動かしてみます。
+    for (var pass = 0; pass < 2 && bestScore >= 10 && budget > 0; pass++) {
+      var moves = 0;
+      for (var i = 0; i < order.length && bestScore >= 10 && budget > 0; i++) {
+        // 近くの組と入れ替えるほか、いちばん前・いちばん後ろへ動かすのも試します
+        // （5名の組を最後に回して、最後部列の5席にぴったり収める、など）
+        var spots = [0, order.length - 1];
+        for (var q = Math.max(0, i - 6); q < Math.min(order.length, i + 7); q++) spots.push(q);
+        for (var jj = 0; jj < spots.length; jj++) {
+          var j = spots[jj];
+          if (j === i) continue;
+          if (order[i].frontOption !== order[j].frontOption) continue;
+          if (order[i].rearOption !== order[j].rearOption) continue;
+          var moved = order.slice();
+          moved.splice(i, 1);
+          moved.splice(j, 0, order[i]);
+          var d = run(moved, alt, limitRow, tight);
+          var sc = tetrisScore(layout, groups, d);
+          if (sc < bestScore) { order = moved; best = d; bestScore = sc; moves++; break; }
+        }
+      }
+      if (!moves) break;
+    }
+
+    // ④ それでも収まらなければ、かたちを変えて端数を打ち消す
+    //    （3名をL字に、5名を横一列4＋1に、など）
+    for (var round = 0; round < 2 && bestScore >= 10 && budget > 0; round++) {
+      var improved = false;
+      for (var k = 0; k < order.length && bestScore >= 10 && budget > 0; k++) {
+        var g = order[k];
+        if (alt[g.id]) continue;
+        var vs = tetrisVariants(g.size).slice(1, 6);
+        for (var v = 0; v < vs.length; v++) {
+          var trial = merge2(alt, {});
+          trial[g.id] = vs[v];
+          var d2 = run(order, trial, limitRow, tight);
+          var sc2 = tetrisScore(layout, groups, d2);
+          if (sc2 < bestScore) { alt = trial; best = d2; bestScore = sc2; improved = true; break; }
+        }
+      }
+      if (!improved) break;
+    }
+
+    // ⑤ ここまでで収まらないのは、かたちを1つ変えただけでは足りない込み具合。
+    //    「1つ変えても悪くならない」なら変えてしまい、その先で打ち消せないかを見ます。
+    if (bestScore >= 10) {
+      var drifted = alt;
+      var driftScore = bestScore;
+      var driftDay = best;
+      for (var dk = 0; dk < order.length && driftScore >= 10 && budget > 0; dk++) {
+        var dg = order[dk];
+        if (drifted[dg.id]) continue;
+        var dvs = tetrisVariants(dg.size).slice(1, 5);
+        for (var dv = 0; dv < dvs.length; dv++) {
+          var dtrial = merge2(drifted, {});
+          dtrial[dg.id] = dvs[dv];
+          var dd = run(order, dtrial, limitRow, tight);
+          var dsc = tetrisScore(layout, groups, dd);
+          if (dsc <= driftScore) { drifted = dtrial; driftDay = dd; driftScore = dsc; break; }
+        }
+      }
+      if (driftScore < bestScore) { alt = drifted; best = driftDay; bestScore = driftScore; }
+    }
+
+    return { day: best, score: bestScore };
+  }
+
+  /** 席が決まったあとの仕上げ（誰がどこに座るか、注意の取りまとめ） */
+  function tetrisFinish(layout, groups, best) {
+    // 離れ離れになってしまった組があれば、はっきりお知らせする
+    var blockCount = {};
+    (best.blocks || []).forEach(function (b) {
+      blockCount[b.groupId] = (blockCount[b.groupId] || 0) + 1;
+    });
+    groups.forEach(function (g) {
+      if ((blockCount[g.id] || 0) <= 1) return;
+      best.warnings.push({
+        type: 'split', level: 'error', groupId: g.id,
+        message: '【要確認】お客様' + alpha(g.order + 1) + '（' + g.size +
+          '名）が離れた席に分かれてしまいました。' + g.size +
+          '名がひとつづきに座れる場所がありません。手で直すか、車両・人数の見直しをご検討ください。'
+      });
+    });
+
+    // 席が決まったので、グループの中で誰がどこに座るかを整える
+    resolveGenders(layout, groups, best);
+    relaxGenderConflicts(layout, groups, best);
+    best.shared = sharedPairs(layout, best);
+    best.shared.forEach(function (sh) {
+      if (!sh.mixedGender) return;
+      best.warnings.push({
+        type: 'mixed-gender', level: 'warn',
+        message: sh.row + '列目で、別のグループの男女が並んで座っています。' +
+          '席がほぼ埋まっていて、ほかに組み合わせがありませんでした。気になる場合は手で入れ替えてください。'
+      });
+    });
+    var note = shapeNotice(groups, best);
+    if (note) best.warnings.push(note);
+    return best;
+  }
+
+  /**
+   * テトリス方式で1日ぶんを組む（席替えの見直しつき）。
+   *
+   * 並べ方そのものは逐次で決まりますが、「どの組から並べ始めるか」は日ごとの席替えの話です。
+   * 前の日につづけて後方になってしまう組がいたら、並べ始める位置だけをずらして見直します。
+   */
+  function tetrisDay(layout, groups, opt) {
+    var day = tetrisAssignDay(layout, groups, opt);
+    if (!opt.previousRows || !opt.rotatingCount) return day;
+
+    var stay = rearStayCount(layout, groups, day, opt.previousRows);
+    if (!stay) return day;
+
+    var baseScore = tetrisScore(layout, groups, day);
+    for (var k = 1; k <= 3 && stay > 0; k++) {
+      var shift = (opt.startIndex + k) % opt.rotatingCount;
+      var alt = tetrisAssignDay(layout, groups, merge2(opt, { startIndex: shift }));
+      var altStay = rearStayCount(layout, groups, alt, opt.previousRows);
+      var altScore = tetrisScore(layout, groups, alt);
+      // 席の出来ばえを落とさない範囲でだけ、席替えのために乗り換えます
+      if (altStay < stay && altScore <= baseScore) {
+        day = alt; stay = altStay; baseScore = altScore;
+      }
+    }
+    return day;
+  }
+
   function assign(input) {
     input = input || {};
     var layout = buildLayout(input.layoutType || '11x45');
@@ -2577,7 +3154,15 @@
     var shareHistory = {}; // グループごとの、これまでに相席になった日数
     for (var d = 0; d < dayCount; d++) {
       var pairIndex = Math.floor(d / 2);
-      var day = buildBestDay(layout, groups, {
+      var day = input.engine !== 'legacy' ? tetrisDay(layout, groups, {
+        startIndex: startIndexForDay(rotating, pairIndex, dayCount),
+        frontStartIndex: startIndexForDay(frontRotating, d, dayCount),
+        reversed: d % 2 === 1,
+        sharing: sharing,
+        idealFeasible: feasible,
+        rotatingCount: rotating.length,
+        previousRows: d > 0 ? dayRowMap(groups, days[d - 1]) : null
+      }) : buildBestDay(layout, groups, {
         frontStartIndex: startIndexForDay(frontRotating, d, dayCount),
         reversed: d % 2 === 1,
         sharing: sharing,
@@ -2673,6 +3258,8 @@
     daySeatMap: daySeatMap,
     daySimilarity: daySimilarity,
     assignDay: assignDay,
+    tetrisAssignDay: tetrisAssignDay,
+    tetrisParts: tetrisParts,
     assign: assign,
     resolveLabels: resolveLabels,
     alpha: alpha,
