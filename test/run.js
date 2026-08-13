@@ -438,6 +438,90 @@ test('おひとり様は、片側がふさがっている席から埋める（�
   });
 });
 
+/* ---------------------------------------------------------
+ * 端数の勘定（本来のかたちで敷き詰められるか）
+ * ------------------------------------------------------- */
+
+test('半端な列の使用席数を、人数から求める', function () {
+  eq(S.partialRows(4).join(','), '', '4名は列をまるごと使う');
+  eq(S.partialRows(8).join(','), '', '8名も同じ');
+  eq(S.partialRows(3).join(','), '3', '3名は3席使って端数1');
+  eq(S.partialRows(7).join(','), '3', '7名も同じ');
+  eq(S.partialRows(2).join(','), '2', '2名は2席使って端数2');
+  eq(S.partialRows(6).join(','), '2', '6名も同じ');
+  eq(S.partialRows(1).join(','), '1', '1名は1席使って端数3');
+  eq(S.partialRows(5).join(','), '3,2', '5名だけは3席の列と2席の列が同時にできる');
+});
+
+test('全組を本来のかたちにできるかを、端数の勘定で言い当てる', function () {
+  var layout = S.buildLayout('11x45');
+  function feasible(sizes) {
+    var gs = S.normalizeGroups(sizes.map(function (n, i) { return group('g' + i, n); }));
+    return S.idealFeasibility(layout, gs);
+  }
+
+  // 見本「ほぼ満席」。最前列2席に2名、最後部5席に5名が収まるので足りる
+  ok(feasible([2, 2, 3, 4, 4, 3, 5, 1, 2, 3, 1, 6, 1, 5]).possible,
+    '見本の構成が「できない」と判定された');
+
+  // 3名だらけ。端数1がたくさん出るのに、埋められるおひとり様が1人しかいない
+  var manyTrios = [];
+  for (var i = 0; i < 14; i++) manyTrios.push(3);
+  manyTrios.push(1);
+  eq(feasible(manyTrios).possible, false, '3名だらけの構成が「できる」と判定された');
+
+  // 2名だけなら、端数2どうしが打ち消し合うので敷き詰められる
+  var pairs = [];
+  for (var j = 0; j < 21; j++) pairs.push(2);
+  ok(feasible(pairs).possible, '2名だけの構成が「できない」と判定された');
+});
+
+test('端数の勘定と、実際に組んだ座席表が食い違わない', function () {
+  var layout = S.buildLayout('11x45');
+  // 決まった手順で構成を作る（毎回おなじ結果になります）
+  var seed = 12345;
+  function rnd(max) { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % max; }
+
+  var checked = 0;
+  for (var t = 0; t < 60; t++) {
+    var sizes = [], total = 0, cap = 30 + rnd(14);
+    while (total < cap) {
+      var n = 1 + rnd(8);
+      if (total + n > cap) n = cap - total;
+      if (n <= 0) break;
+      sizes.push(n); total += n;
+    }
+    if (sizes.length < 2) continue;
+
+    var groups = sizes.map(function (n2, i) { return group('g' + i, n2); });
+    var f = S.idealFeasibility(layout, S.normalizeGroups(groups));
+    var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+    var off = S.nonIdealGroups(r.groups, r.days[0]).length;
+    checked++;
+
+    // 「できない」と言い切ったのに、実際は全組そろっていた → 勘定が間違っている
+    ok(f.possible || off > 0,
+      '「できない」判定なのに全組そろった: ' + sizes.join(','));
+    // 「できる」はずなのに、そろえられなかった → 並べ方の探索が足りない
+    ok(!f.possible || off === 0,
+      '「できる」はずがそろえられなかった: ' + sizes.join(','));
+  }
+  ok(checked >= 50, '検証した構成が少なすぎる: ' + checked);
+});
+
+test('できない構成では、お知らせの言い方が変わる', function () {
+  var groups = [];
+  for (var i = 0; i < 14; i++) groups.push(group('g' + i, 3));
+  groups.push(group('one', 1));
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  var note = r.days[0].warnings.filter(function (w) { return w.type === 'shape-differs'; });
+  eq(note.length, 1, 'お知らせが出ていない');
+  ok(note[0].message.indexOf('端数の計算上') >= 0,
+    '「直しようがない」ことが伝わらない: ' + note[0].message);
+  ok(note[0].message.indexOf('手で入れ替えてください') < 0,
+    'できない構成なのに手直しを促している');
+});
+
 test('本来のかたちに収まらなかった組は、座席表の下でお知らせする', function () {
   // 満席43名を3名の組だけで埋める。3名は横一列（4席のうち3席）が本来のかたちなので、
   // 全組をそのかたちにすると席が足りません。どこかは崩れます

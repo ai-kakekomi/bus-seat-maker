@@ -400,6 +400,91 @@
     return '横一列4席×' + full + '列＋次の列に' + rest + '席';
   }
 
+  /* ---------------------------------------------------------
+   * 端数の勘定（本来のかたちで敷き詰められるか）
+   *
+   * 通常列は4席。グループを本来のかたちで置くと、最後の列に「端数」が出ます。
+   *
+   *   4名・8名 … 端数なし（列をまるごと使う）
+   *   3名・7名 … 3席使って、端数1
+   *   2名・6名 … 2席使って、端数2
+   *   1名     … 1席使って、端数3
+   *   5名     … 正方形＋通路またぎ1なので、3席の列と2席の列が同時にできる
+   *
+   * 端数どうしを組み合わせて、ちょうど4席になれば席は無駄になりません。
+   *   ・端数1（3席使った列の残り）は、<strong>おひとり様でしか埋められない</strong>
+   *   ・端数2（2席使った列の残り）は、2人組でも、ほかの「2席使った列」でも埋まる
+   *
+   * この勘定で足りなければ、どう並べ替えても全組を本来のかたちにはできません。
+   * 逆に足りていても、席のつながり方の都合で崩れることはあるので、
+   * 「計算のうえでは可能」までしか言えません（必要条件です）。
+   * ------------------------------------------------------- */
+
+  /** グループを本来のかたちで置いたときの、半端な列の使用席数（1〜3席） */
+  function partialRows(size) {
+    if (size === 5) return [3, 2]; // 正方形＋通路またぎ1
+    var r = size % ROW_SEATS;
+    return r === 0 ? [] : [r];
+  }
+
+  /**
+   * 半端な列どうしを組み合わせても、どうしても余ってしまう席数。
+   * 4席の列に、1〜3席の使いかけを詰め合わせる問題です。
+   */
+  function wastedSeats(parts, special) {
+    var ones = 0, twos = 0, threes = 0;
+    parts.forEach(function (n) {
+      if (n === 1) ones++; else if (n === 2) twos++; else if (n === 3) threes++;
+    });
+
+    if (special) {
+      // いちばん前の列は、お客様が座れるのが2席だけ（運転席側は業務席）。
+      // 「2席使う列」をひとつ、そのまま引き受けられます
+      if (twos > 0) twos--;
+      else if (ones >= 2) ones -= 2;
+
+      // いちばん後ろの列は5席。「3席使う列」と「2席使う列」をひとつずつ引き受けられます
+      //（5名のグループがそのまま横一列に収まる形です）
+      if (threes > 0 && twos > 0) { threes--; twos--; }
+    }
+
+    // 3席の列は、おひとり様をひとり迎えるとちょうど4席になる
+    var matched = Math.min(ones, threes);
+    ones -= matched;
+    threes -= matched;
+
+    var waste = threes * 1; // 相手のいない3席の列は、1席あまる
+
+    if (twos % 2 === 1) {
+      // 2席の列どうしは2つで1列。あぶれた1つは、おひとり様2人でも埋まる
+      var use = Math.min(2, ones);
+      waste += 2 - use;
+      ones -= use;
+    }
+
+    if (ones > 0) { // 残ったおひとり様は、4人で1列
+      var rest = ones % ROW_SEATS;
+      if (rest > 0) waste += ROW_SEATS - rest;
+    }
+    return waste;
+  }
+
+  /**
+   * 全組を本来のかたちにできるか、端数の勘定で調べる。
+   * @returns {object} { possible, waste, spare }
+   */
+  function idealFeasibility(layout, groups) {
+    var parts = [];
+    var total = 0;
+    groups.forEach(function (g) {
+      total += g.size;
+      partialRows(g.size).forEach(function (n) { parts.push(n); });
+    });
+    var spare = layout.usableSeatCount - total;
+    var waste = wastedSeats(parts, true);
+    return { possible: waste <= spare, waste: waste, spare: spare };
+  }
+
   /**
    * 理想のかたちに収まらなかったグループを拾う。
    * ひとつづきに座れているグループだけを見ます
@@ -442,12 +527,20 @@
       return n + '名の本来のかたちは ' + idealShapeName(n) + ' です。';
     }).join('');
 
+    // 端数の勘定で、そもそも全組を本来のかたちにできる構成かどうかを見る。
+    // できない構成なら「直しようがない」と言い切れます
+    var feasible = day.idealFeasible;
+    var why = feasible === false
+      ? '今回のお申し込みの組み合わせでは、端数の計算上、' +
+        '全部のグループを本来のかたちにすることはできません。どう並べ替えても、どこかは崩れます。'
+      : 'ほかのグループがひとつづきに座れることを優先した結果です。' +
+        'かたちをそろえたい場合は、手で入れ替えてください。';
+
     return {
       type: 'shape-differs', level: 'warn',
-      message: '席が混んでいるため、' + odd.length + '組が本来のかたちになっていません：' +
-        names.join('、') + '。' + shapes +
-        'ほかのグループがひとつづきに座れることを優先した結果です。' +
-        'かたちをそろえたい場合は、手で入れ替えてください。'
+      message: (feasible === false ? '' : '席が混んでいるため、') +
+        odd.length + '組が本来のかたちになっていません：' +
+        names.join('、') + '。' + shapes + why
     };
   }
 
@@ -1287,6 +1380,8 @@
       frontStartIndex: frontStartIndex,
       reversed: !!opt.reversed,
       noLookahead: !!opt.noLookahead,
+      // 端数の勘定で「そもそも全組を本来のかたちにできる構成か」（assign から渡されます）
+      idealFeasible: opt.idealFeasible,
       shifted: startIndex > 0 || frontStartIndex > 0 || !!opt.reversed,
       sharing: sharing, // true = 席が窮屈なので相席もありうる
       placements: {},
@@ -1449,6 +1544,7 @@
           reversed: day.reversed,
           sharing: opt.sharing,
           noLookahead: day.noLookahead,
+          idealFeasible: day.idealFeasible,
           orderOverride: order
         });
         var sc = dayScore(groups, retry);
@@ -1487,6 +1583,7 @@
         reversed: day.reversed,
         sharing: opt.sharing,
         noLookahead: day.noLookahead,
+        idealFeasible: day.idealFeasible,
         orderOverride: order
       });
       var sc = dayScore(groups, retry);
@@ -1655,7 +1752,8 @@
         frontStartIndex: opt.frontStartIndex,
         reversed: reversed,
         sharing: opt.sharing,
-        noLookahead: way.noLookahead
+        noLookahead: way.noLookahead,
+        idealFeasible: opt.idealFeasible
       });
       return repackSplits(layout, groups, opt, day);
     }
@@ -2453,6 +2551,9 @@
     //   2日ツアー … 1日目そのまま／2日目 前後反転
     //   3日ツアー … ＋3日目は開始位置をずらす
     //   4日ツアー … ＋4日目はずらしたうえで前後反転
+    // 端数の勘定。全組を本来のかたちにできる構成かどうか（必要条件）
+    var feasible = idealFeasibility(layout, groups).possible;
+
     var days = [];
     var shareHistory = {}; // グループごとの、これまでに相席になった日数
     for (var d = 0; d < dayCount; d++) {
@@ -2461,6 +2562,7 @@
         frontStartIndex: startIndexForDay(frontRotating, d, dayCount),
         reversed: d % 2 === 1,
         sharing: sharing,
+        idealFeasible: feasible,
         shareHistory: d > 0 ? shareHistory : null,
         previousRows: d > 0 ? dayRowMap(groups, days[d - 1]) : null,
         previousSeatMaps: days.map(daySeatMap)
@@ -2537,6 +2639,8 @@
     COLOR_COUNT: COLOR_COUNT,
     MAX_DEPTH: MAX_DEPTH,
     idealShapeOf: idealShapeOf,
+    idealFeasibility: idealFeasibility,
+    partialRows: partialRows,
     depthLimitFor: depthLimitFor,
     buildLayout: buildLayout,
     trackOf: trackOf,
