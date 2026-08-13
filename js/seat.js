@@ -278,11 +278,38 @@
     3: { w: 3, h: 1 },
     4: { w: 2, h: 2 },
     5: { w: 3, h: 2 },
-    6: { w: 4, h: 2 },
-    // 7名は横2列ぶんから窓側を1席だけ空けた形。8名は横2列をまるごと使う形
-    7: { w: 4, h: 2, holeAtWindow: true },
-    8: { w: 4, h: 2 }
+    6: { w: 4, h: 2 }
   };
+
+  var ROW_SEATS = 4; // 通常列の座席数（左2席＋右2席）
+
+  /**
+   * 人数から理想のかたちを求める。
+   * 7名以上は「横一列（4席）をまるごと使う列を必要なだけ重ね、あまりを次の列に置く」形です。
+   *   7名 → 4席×2列から1席空け（空けるのは窓側）
+   *   8名 → 4席×2列をまるごと
+   *   9名 → 4席×2列＋1名／10名 → ＋2名／11名 → ＋3名（空きは1席なので窓側）
+   * あまりを列のどちら端に寄せるかは決めません（パズルとして解けることを優先）。
+   */
+  function idealShapeOf(count) {
+    if (IDEAL_SHAPES[count]) return IDEAL_SHAPES[count];
+    if (count < ROW_SEATS * 2 - 1) return null; // 1〜6名は上の表がすべて
+    var h = Math.ceil(count / ROW_SEATS);
+    var holes = ROW_SEATS * h - count;
+    // 空きが1席だけのときは、その1席は窓側にする（通路側にぽつんと空くのは不自然）
+    return { w: ROW_SEATS, h: h, holeAtWindow: holes === 1 };
+  }
+
+  /** そのグループが使ってよい奥行き（前後の列数）。大人数ほど深くなります */
+  function depthLimitFor(count) {
+    var want = idealShapeOf(count);
+    return want ? Math.max(MAX_DEPTH, want.h) : MAX_DEPTH;
+  }
+
+  /** 四角にするために空けてよい席数。大人数は「列のあまり」ぶんまで許します */
+  function wasteLimitFor(count) {
+    return idealShapeOf(count) ? Math.max(MAX_WASTE, ROW_SEATS - 1) : MAX_WASTE;
+  }
   var IDEAL_BONUS = 2.5; // 理想のかたちに収まったときの、ごほうび点（他の好みより強い）
   var ROW_LOOKAHEAD = 1; // 理想のかたちを求めて、うしろの列を何列ぶんまで見にいくか
   var ROW_PENALTY = 1.0; // 1列うしろにずらすことへの減点（IDEAL_BONUS より小さくしてある）
@@ -310,10 +337,22 @@
     3: '通路をまたいだ横一列（■■｜■）',
     4: '片側に集めた正方形（■■／■■）',
     5: '正方形＋通路をまたいで1席（■■｜■／■■）',
-    6: '横一列4席＋2席（■■｜■■／■■）',
-    7: '横一列4席×2列から、窓側を1席だけ空けた形',
-    8: '横一列4席×2列（2列まるごと）'
+    6: '横一列4席＋2席（■■｜■■／■■）'
   };
+
+  /** 理想のかたちを、お客様に見せる言葉にする */
+  function idealShapeName(count) {
+    if (IDEAL_SHAPE_NAMES[count]) return IDEAL_SHAPE_NAMES[count];
+    var want = idealShapeOf(count);
+    if (!want) return '';
+    var full = Math.floor(count / ROW_SEATS);
+    var rest = count - full * ROW_SEATS;
+    if (rest === 0) return '横一列4席×' + full + '列（' + full + '列まるごと）';
+    if (ROW_SEATS - rest === 1) {
+      return '横一列4席×' + (full + 1) + '列から、窓側を1席だけ空けた形';
+    }
+    return '横一列4席×' + full + '列＋次の列に' + rest + '席';
+  }
 
   /**
    * 理想のかたちに収まらなかったグループを拾う。
@@ -329,7 +368,7 @@
     });
     return groups.filter(function (g) {
       if (count[g.id] !== 1) return false;
-      var want = IDEAL_SHAPES[g.size];
+      var want = idealShapeOf(g.size);
       if (!want) return false;
       var b = box[g.id];
       if (b.people !== g.size) return false; // 取り置き空席つきの枠は別の話
@@ -348,7 +387,7 @@
     var sizes = [];
     odd.forEach(function (g) { if (sizes.indexOf(g.size) < 0) sizes.push(g.size); });
     var shapes = sizes.sort(function (a, b) { return a - b; }).map(function (n) {
-      return n + '名の本来のかたちは ' + IDEAL_SHAPE_NAMES[n] + ' です。';
+      return n + '名の本来のかたちは ' + idealShapeName(n) + ' です。';
     }).join('');
 
     return {
@@ -391,7 +430,7 @@
    * 同じ2席落としでも「3席×2列」のかたちは理想になりません。
    */
   function idealBonus(count, cells) {
-    var want = IDEAL_SHAPES[count];
+    var want = idealShapeOf(count);
     if (!want || !cells || cells.length !== count) return 0;
     var box = cellBox(cells);
     if (box.w !== want.w || box.h !== want.h) return 0;
@@ -423,21 +462,21 @@
    *  ・幅1席のまま縦に2席以上ならぶ形は禁止（2名の縦並び等。2名は必ず横に並べる）
    *  ・1席だけのときは、もちろん可
    */
-  function shapeAllowed(w, h, deepOk) {
+  function shapeAllowed(w, h, deepOk, limit) {
     if (h <= 0 || w <= 0) return false;
-    if (!deepOk && h > MAX_DEPTH) return false;
+    if (!deepOk && h > (limit || MAX_DEPTH)) return false;
     if (h >= 2 && w < 2) return false; // 縦並びのペアを作らない
     return true;
   }
 
   /** 実際に使う席のかたまりが、使ってよい形に収まっているか（角を欠けさせたあとの検査） */
-  function cellsAllowed(cells, deepOk) {
+  function cellsAllowed(cells, deepOk, limit) {
     if (cells.length <= 1) return true;
     var rows = cells.map(function (c) { return c.i; });
     var cols = cells.map(function (c) { return c.j; });
     var h = Math.max.apply(null, rows) - Math.min.apply(null, rows) + 1;
     var w = Math.max.apply(null, cols) - Math.min.apply(null, cols) + 1;
-    return shapeAllowed(w, h, deepOk);
+    return shapeAllowed(w, h, deepOk, limit);
   }
 
   /**
@@ -647,17 +686,19 @@
         if (opt.origin && r0 !== opt.origin.row) continue;
 
         var maxH = r0 === lastRow ? 1 : lastRow - r0; // 最後部列と通常列はまたがない
-        if (!opt.allowDeep && !opt.allowAnyShape) maxH = Math.min(maxH, MAX_DEPTH);
+        // 大人数のグループは、理想のかたちに必要なぶんだけ深く取れるようにする
+        var depthLimit = depthLimitFor(count);
+        if (!opt.allowDeep && !opt.allowAnyShape) maxH = Math.min(maxH, depthLimit);
         var maxW = r0 === lastRow ? 5 : 4;
         var best = null;
 
         for (var h = 1; h <= maxH; h++) {
           if (opt.frontOnly && r0 + h - 1 > FRONT_ROWS) break;
           for (var w = 1; w <= maxW; w++) {
-            if (!opt.allowAnyShape && !shapeAllowed(w, h, opt.allowDeep)) continue;
+            if (!opt.allowAnyShape && !shapeAllowed(w, h, opt.allowDeep, depthLimit)) continue;
             var area = w * h;
             if (area < count) continue;
-            if (area - count > MAX_WASTE) continue;
+            if (area - count > wasteLimitFor(count)) continue;
 
             for (var c0 = 1; c0 + w - 1 <= maxW; c0++) {
               if (opt.origin && c0 !== opt.origin.col) continue;
@@ -670,7 +711,8 @@
               if (busy) continue;
 
               // 候補の形（そのままの四角／角を欠けさせたL字）
-              var shapes = shapeCandidates(full, w, h, count, allowPad, opt.allowDeep || opt.allowAnyShape);
+              var shapes = shapeCandidates(full, w, h, count, allowPad,
+                opt.allowDeep || opt.allowAnyShape, depthLimit);
               for (var si = 0; si < shapes.length; si++) {
                 var sh = shapes[si];
                 if (!opt.allowAnyShape && !mergedShapeOk(sh.seats, opt.groupId, opt.allowDeep)) continue;
@@ -711,7 +753,7 @@
      * ・角を1〜2席ぶん欠けさせたL字（空席が出ない）
      * 欠けさせたあとも、前後左右でひとつながりであることを確かめます。
      */
-    function shapeCandidates(full, w, h, count, allowPad, deepOk) {
+    function shapeCandidates(full, w, h, count, allowPad, deepOk, depthLimit) {
       var out = [];
       var area = full.length;
       var waste = area - count;
@@ -721,42 +763,57 @@
         return out;
       }
       if (allowPad) out.push({ seats: full, cut: 0, waste: waste });
-      if (waste > 2) return out;
+      if (waste >= w) return out; // 1列ぶん以上あまるなら、そもそも四角が大きすぎる
 
-      // 角から waste 席ぶん欠けさせる。
-      // 前の列・窓側を残したいので、後ろ・通路側の角から先に試します。
-      var corners = [[h - 1, w - 1], [h - 1, 0], [0, w - 1], [0, 0]];
-      var seen = {};
-      corners.forEach(function (cn) {
-        var patterns = [[cn]];
-        if (waste === 2) {
-          patterns = [];
+      var patternList = [];
+
+      // (1) 角から waste 席ぶん欠けさせる（2席ぶんまで）。
+      //     前の列・窓側を残したいので、後ろ・通路側の角から先に試します。
+      if (waste <= 2) {
+        var corners = [[h - 1, w - 1], [h - 1, 0], [0, w - 1], [0, 0]];
+        corners.forEach(function (cn) {
+          if (waste === 1) { patternList.push([cn]); return; }
           // 角のとなり（同じ列方向／同じ席方向）をもう1席
-          if (w >= 2) patterns.push([cn, [cn[0], cn[1] === 0 ? 1 : w - 2]]);
-          if (h >= 2) patterns.push([cn, [cn[0] === 0 ? 1 : h - 2, cn[1]]]);
-        }
-        patterns.forEach(function (cells) {
-          var drop = {};
-          cells.forEach(function (c) { drop[c[0] + ',' + c[1]] = true; });
-          if (Object.keys(drop).length !== waste) return;
+          if (w >= 2) patternList.push([cn, [cn[0], cn[1] === 0 ? 1 : w - 2]]);
+          if (h >= 2) patternList.push([cn, [cn[0] === 0 ? 1 : h - 2, cn[1]]]);
+        });
+      }
 
-          var kept = [];
-          for (var i = 0; i < h; i++) {
-            for (var j = 0; j < w; j++) {
-              if (!drop[i + ',' + j]) kept.push({ i: i, j: j, seat: full[i * w + j] });
-            }
+      // (2) 端の列（いちばん前かいちばん後ろ）を、片側から waste 席ぶんだけ欠けさせる。
+      //     「横一列をまるごと使う列を重ねて、あまりを1列に置く」大人数の形がこれです。
+      [0, h - 1].forEach(function (i) {
+        [true, false].forEach(function (fromLeft) {
+          var cells = [];
+          for (var k = 0; k < waste; k++) {
+            cells.push([i, fromLeft ? k : w - 1 - k]);
           }
-          if (kept.length !== count) return;
-          if (!isConnectedCells(kept)) return;
-          if (!deepOk && !cellsAllowed(kept, false)) return; // 欠けさせた結果が縦長になっていないか
+          patternList.push(cells);
+        });
+      });
 
-          var key = kept.map(function (k) { return k.seat.id; }).join('|');
-          if (seen[key]) return;
-          seen[key] = true;
-          out.push({
-            seats: kept.map(function (k) { return k.seat; }),
-            cut: waste, waste: 0
-          });
+      var seen = {};
+      patternList.forEach(function (cells) {
+        var drop = {};
+        cells.forEach(function (c) { drop[c[0] + ',' + c[1]] = true; });
+        if (Object.keys(drop).length !== waste) return;
+
+        var kept = [];
+        for (var i = 0; i < h; i++) {
+          for (var j = 0; j < w; j++) {
+            if (!drop[i + ',' + j]) kept.push({ i: i, j: j, seat: full[i * w + j] });
+          }
+        }
+        if (kept.length !== count) return;
+        if (!isConnectedCells(kept)) return;
+        // 欠けさせた結果が縦長になっていないか
+        if (!deepOk && !cellsAllowed(kept, false, depthLimit)) return;
+
+        var key = kept.map(function (k) { return k.seat.id; }).join('|');
+        if (seen[key]) return;
+        seen[key] = true;
+        out.push({
+          seats: kept.map(function (k) { return k.seat; }),
+          cut: waste, waste: 0
         });
       });
       return out;
@@ -1114,7 +1171,7 @@
       if (b0) {
         var hh0 = b0.row1 - b0.row0 + 1;
         var ww0 = b0.col1 - b0.col0 + 1;
-        okShape = shapeAllowed(ww0, hh0, false);
+        okShape = shapeAllowed(ww0, hh0, false, g0 ? depthLimitFor(g0.size) : MAX_DEPTH);
       }
       if (okShape || !g0) {
         warnings.splice(wi, 1); // きれいにつながったので、注意は不要
@@ -1366,7 +1423,7 @@
     (day.blocks || []).forEach(function (b) {
       var depth = b.row1 - b.row0 + 1;
       var width = b.col1 - b.col0 + 1;
-      if (depth > MAX_DEPTH && byId[b.groupId]) {
+      if (byId[b.groupId] && depth > depthLimitFor(byId[b.groupId].size)) {
         issues.push({
           type: 'deep-block', level: 'warn', groupId: b.groupId,
           message: nameOf(byId[b.groupId]) + 'の席が前後' + depth + '列に伸びています。'
@@ -2070,6 +2127,8 @@
     FRONT_ROWS: FRONT_ROWS,
     COLOR_COUNT: COLOR_COUNT,
     MAX_DEPTH: MAX_DEPTH,
+    idealShapeOf: idealShapeOf,
+    depthLimitFor: depthLimitFor,
     buildLayout: buildLayout,
     trackOf: trackOf,
     physicalNeighbors: physicalNeighbors,
