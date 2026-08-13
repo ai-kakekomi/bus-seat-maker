@@ -73,6 +73,7 @@
       return {
         id: g.id || newId(), size: size, members: members,
         frontOption: !!g.frontOption,
+        rearOption: !g.frontOption && !!g.rearOption,
         surname: g.surname || '', givenName: givenNameOf(g)
       };
     });
@@ -98,7 +99,10 @@
     var n = size || 2;
     var members = [];
     for (var i = 0; i < n; i++) members.push({ gender: 'unknown' });
-    state.groups.push({ id: newId(), size: n, members: members, frontOption: false, surname: '', givenName: '' });
+    state.groups.push({
+      id: newId(), size: n, members: members,
+      frontOption: false, rearOption: false, surname: '', givenName: ''
+    });
   }
 
   function setSize(g, n) {
@@ -194,10 +198,25 @@
       var cb = el('input');
       cb.type = 'checkbox';
       cb.checked = g.frontOption;
-      cb.addEventListener('change', function () { g.frontOption = cb.checked; changed(); });
+      cb.addEventListener('change', function () {
+        g.frontOption = cb.checked;
+        if (cb.checked) g.rearOption = false; // 前と後ろは同時に選べません
+        changed();
+      });
       frontWrap.appendChild(cb);
       frontWrap.appendChild(el('span', null, '前のお席をご希望（有料オプション）'));
       body.appendChild(frontWrap);
+
+      // にぎやかな大人数のグループを、まん中から外したいときに使います
+      var rearWrap = el('label', 'toggle-line');
+      var cbR = el('input');
+      cbR.type = 'checkbox';
+      cbR.checked = !!g.rearOption;
+      cbR.disabled = !!g.frontOption;
+      cbR.addEventListener('change', function () { g.rearOption = cbR.checked; changed(); });
+      rearWrap.appendChild(cbR);
+      rearWrap.appendChild(el('span', null, '後ろのお席にまとめる（にぎやかな大人数など）'));
+      body.appendChild(rearWrap);
 
       li.appendChild(body);
 
@@ -365,8 +384,9 @@
       result.labels.forEach(function (l) {
         var c = result.colors[l.groupId];
         if (l.frontOption) hasFront = true;
+        var mark = l.frontOption ? '（前席）' : (l.rearOption ? '（後方）' : '');
         legend.appendChild(el('span', 'lg' + c + (l.frontOption ? ' is-front-opt' : ''),
-          l.label + ' ' + l.sizeMark + '名' + (l.frontOption ? '（前席）' : '')));
+          l.label + ' ' + l.sizeMark + '名' + mark));
       });
       if (hasFront) {
         legend.appendChild(el('span', 'legend-note is-front-opt lg-plain', '斜めストライプ＝前席オプション'));
@@ -656,7 +676,8 @@
     return {
       id: newId(), size: size,
       members: genders.map(function (x) { return { gender: x }; }),
-      frontOption: !!opt.front, surname: opt.surname || '', givenName: opt.givenName || ''
+      frontOption: !!opt.front, rearOption: !!opt.rear,
+      surname: opt.surname || '', givenName: opt.givenName || ''
     };
   }
 

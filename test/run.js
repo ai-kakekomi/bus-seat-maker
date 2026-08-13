@@ -37,6 +37,7 @@ function group(id, size, opt) {
   return {
     id: id, size: size, members: members,
     frontOption: !!opt.frontOption,
+    rearOption: !!opt.rearOption,
     surname: opt.surname || '', givenName: opt.givenName || ''
   };
 }
@@ -1286,6 +1287,52 @@ test('後方が続かないときは、お知らせを出さない', function ()
     return a.concat(d.warnings.filter(function (w) { return w.type === 'rear-stay'; }));
   }, []);
   eq(all.length, 0, '見本の構成で余計なお知らせが出ている');
+});
+
+test('「後ろのお席にまとめる」を選んだ組は、うしろから詰める', function () {
+  var groups = [
+    group('f1', 2, { frontOption: true }),
+    group('n1', 3), group('n2', 2), group('n3', 4), group('n4', 2),
+    group('r1', 8, { rearOption: true }),
+    group('r2', 6, { rearOption: true })
+  ];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 2 });
+
+  function frontRowOf(day, id) {
+    return Math.min.apply(null, day.seatsOfGroup[id].map(seatRow));
+  }
+  function lastRowOf(day, id) {
+    return Math.max.apply(null, day.seatsOfGroup[id].map(seatRow));
+  }
+
+  r.days.forEach(function (day, di) {
+    // ふつうの組より、必ずうしろにいること
+    var normalLast = Math.max(
+      lastRowOf(day, 'n1'), lastRowOf(day, 'n2'),
+      lastRowOf(day, 'n3'), lastRowOf(day, 'n4')
+    );
+    ['r1', 'r2'].forEach(function (id) {
+      ok(frontRowOf(day, id) > normalLast,
+        (di + 1) + '日目：' + id + ' がふつうの組より前にいる');
+    });
+    // バスのうしろ半分にいること（まん中を避けるのが目的なので）
+    ['r1', 'r2'].forEach(function (id) {
+      ok(frontRowOf(day, id) > r.layout.rows / 2,
+        (di + 1) + '日目：' + id + ' がまん中より前にいる');
+    });
+  });
+
+  // ご希望どおりなので「連日後方」のお知らせは出さない
+  var notes = r.days.reduce(function (a, d) {
+    return a.concat(d.warnings.filter(function (w) { return w.type === 'rear-stay'; }));
+  }, []);
+  eq(notes.length, 0, 'ご希望どおりなのにお知らせが出ている');
+});
+
+test('前席と後方の両方が指定されたら、前席を優先する', function () {
+  var gs = S.normalizeGroups([{ id: 'g1', size: 2, frontOption: true, rearOption: true }]);
+  eq(gs[0].frontOption, true, '前席');
+  eq(gs[0].rearOption, false, '後方は取り下げる');
 });
 
 test('日ごとの並びは「似ぐあい」で見る（1人動かしただけでは別物にしない）', function () {
