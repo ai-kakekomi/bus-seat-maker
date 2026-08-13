@@ -286,7 +286,8 @@ test('各グループの席はひとつながりになる（斜めだけの接�
 });
 
 test('3名グループは通路をまたいだ横一列（■■｜■）になる', function () {
-  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 3)], days: 1 });
+  // 最前列は業務席で2席しか使えないので、そこは2名の組にふさいでもらう
+  var r = S.assign({ layoutType: '11x45', groups: [group('g0', 2), group('g1', 3)], days: 1 });
   var day = r.days[0];
   var bs = blocksOf(day, 'g1');
   eq(bs.length, 1, 'ブロック数');
@@ -299,14 +300,14 @@ test('3名グループは通路をまたいだ横一列（■■｜■）にな�
 });
 
 // 人数ごとの理想のかたち（ゆみさん＝阪急交通社の現場回答にもとづく）
-//   4名 ＝ 片側に集めた正方形／5名 ＝ 正方形＋通路をまたいで1／6名 ＝ 横一列4＋2
+//   4名 ＝ 通路をまたいだ横一列／5名 ＝ 正方形＋通路をまたいで1／6名 ＝ 横一列4＋2
 //   7名 ＝ 横2列から窓側1席を空ける／8名 ＝ 横2列をまるごと
 //   9名以上 ＝ 横一列（4席）の列を必要なだけ重ね、あまりを次の列に置く
-[[4, 2, 2], [5, 3, 2], [6, 4, 2], [7, 4, 2], [8, 4, 2],
+[[4, 4, 1], [5, 3, 2], [6, 4, 2], [7, 4, 2], [8, 4, 2],
  [9, 4, 3], [10, 4, 3], [11, 4, 3], [12, 4, 3], [13, 4, 4]].forEach(function (c) {
   var size = c[0], wantW = c[1], wantH = c[2];
   test(size + '名グループは外わく' + wantW + '席×' + wantH + '列に収まる', function () {
-    var r = S.assign({ layoutType: '11x45', groups: [group('g1', size)], days: 1 });
+    var r = S.assign({ layoutType: '11x45', groups: [group('g0', 2), group('g1', size)], days: 1 });
     var day = r.days[0];
     var bs = blocksOf(day, 'g1');
     eq(bs.length, 1, 'ブロック数');
@@ -320,7 +321,7 @@ test('3名グループは通路をまたいだ横一列（■■｜■）にな�
 // 空きが1席だけになる人数（7名・11名…）は、その1席を窓側にする
 [7, 11].forEach(function (size) {
 test(size + '名グループが空ける1席は窓側になる', function () {
-  var r = S.assign({ layoutType: '11x45', groups: [group('g1', size)], days: 1 });
+  var r = S.assign({ layoutType: '11x45', groups: [group('g0', 2), group('g1', size)], days: 1 });
   var day = r.days[0];
   var bs = blocksOf(day, 'g1');
   eq(bs.length, 1, 'ブロック数');
@@ -342,7 +343,7 @@ test(size + '名グループが空ける1席は窓側になる', function () {
 
 test('大人数のグループは横一列を重ねた形になり、前後に長い警告も出ない', function () {
   [9, 10, 12, 15].forEach(function (size) {
-    var r = S.assign({ layoutType: '11x45', groups: [group('g1', size)], days: 1 });
+    var r = S.assign({ layoutType: '11x45', groups: [group('g0', 2), group('g1', size)], days: 1 });
     var day = r.days[0];
     eq(blocksOf(day, 'g1').length, 1, size + '名がひとつづきでない');
     eq(S.nonIdealGroups(r.groups, day).length, 0, size + '名が本来のかたちでない');
@@ -392,6 +393,43 @@ test('本来のかたちに収まっていれば、お知らせは出ない', fu
   eq(S.nonIdealGroups(r.groups, r.days[0]).length, 0, '本来のかたちに収まっていない組がある');
   eq(r.days[0].warnings.filter(function (w) { return w.type === 'shape-differs'; }).length, 0,
     '余計なお知らせが出ている');
+});
+
+test('2名グループが通路をはさんで分かれることはない', function () {
+  // 通常列の2人掛けは col1-col2 と col3-col4。col2-col3 は通路をまたぐのでNG
+  function checkNoAisleSplit(r, where) {
+    r.days.forEach(function (day, di) {
+      r.groups.forEach(function (g) {
+        if (g.size !== 2) return;
+        var ids = day.seatsOfGroup[g.id] || [];
+        if (ids.length !== 2) return;
+        var a = ids[0].split('-'), b = ids[1].split('-');
+        var rowA = Number(a[0].slice(1)), rowB = Number(b[0].slice(1));
+        if (rowA !== rowB || rowA === r.layout.lastRow) return; // 最後部列に通路はない
+        var lo = Math.min(Number(a[1]), Number(b[1]));
+        ok(lo !== 2, where + ' ' + (di + 1) + '日目：' + g.id + ' が通路で分かれた（' + ids.join(',') + '）');
+      });
+    });
+  }
+
+  // ゆったり
+  var few = [];
+  for (var i = 0; i < 8; i++) few.push(group('a' + i, 2));
+  checkNoAisleSplit(S.assign({ layoutType: '11x45', groups: few, days: 2 }), 'ゆったり');
+
+  // ぎゅうぎゅう（2名だけで42名）
+  var many = [];
+  for (var j = 0; j < 21; j++) many.push(group('b' + j, 2));
+  checkNoAisleSplit(S.assign({ layoutType: '11x45', groups: many, days: 3 }), '2名だけ42名');
+
+  // 満席（奇数グループ混じり）
+  var mix = [];
+  for (var k = 0; k < 13; k++) mix.push(group('c' + k, 3));
+  mix.push(group('d1', 2));
+  mix.push(group('d2', 2));
+  var r3 = S.assign({ layoutType: '11x45', groups: mix, days: 2 });
+  eq(r3.totalPeople, 43, '満席の人数');
+  checkNoAisleSplit(r3, '満席');
 });
 
 test('最後部列（5席横並び）は最終手段で、空きがあるうちは使わない', function () {
