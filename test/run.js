@@ -300,7 +300,8 @@ test('3名グループは通路をまたいだ横一列（■■｜■）にな�
 
 // 人数ごとの理想のかたち（ゆみさん＝阪急交通社の現場回答にもとづく）
 //   4名 ＝ 片側に集めた正方形／5名 ＝ 正方形＋通路をまたいで1／6名 ＝ 横一列4＋2
-[[4, 2, 2], [5, 3, 2], [6, 4, 2]].forEach(function (c) {
+//   7名 ＝ 横2列から窓側1席を空ける／8名 ＝ 横2列をまるごと
+[[4, 2, 2], [5, 3, 2], [6, 4, 2], [7, 4, 2], [8, 4, 2]].forEach(function (c) {
   var size = c[0], wantW = c[1], wantH = c[2];
   test(size + '名グループは外わく' + wantW + '席×' + wantH + '列に収まる', function () {
     var r = S.assign({ layoutType: '11x45', groups: [group('g1', size)], days: 1 });
@@ -312,6 +313,26 @@ test('3名グループは通路をまたいだ横一列（■■｜■）にな�
     eq(bs[0].row1 - bs[0].row0 + 1, wantH, '列数');
     eq(Object.keys(day.reserved).length, 0, '枠の中の取り置き空席');
   });
+});
+
+test('7名グループが空ける1席は窓側になる', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 7)], days: 1 });
+  var day = r.days[0];
+  var bs = blocksOf(day, 'g1');
+  eq(bs.length, 1, 'ブロック数');
+  eq(bs[0].people, 7, '枠の中の人数');
+
+  // 外わく（4席×2列）のうち、座っていない1席を探す
+  var used = {};
+  day.seatsOfGroup['g1'].forEach(function (id) { used[id] = true; });
+  var holes = [];
+  for (var row = bs[0].row0; row <= bs[0].row1; row++) {
+    for (var col = bs[0].col0; col <= bs[0].col1; col++) {
+      if (!used['r' + row + '-' + col]) holes.push(col);
+    }
+  }
+  eq(holes.length, 1, '空いている席の数');
+  ok(holes[0] === 1 || holes[0] === 4, '空けた席が窓側でない: col' + holes[0]);
 });
 
 test('相席なしのおひとり様は窓側に座る', function () {

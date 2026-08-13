@@ -265,6 +265,10 @@
    *   4名  ■■        5名  ■■｜■      6名  ■■｜■■
    *        ■■             ■■｜□           ■■｜□□
    *
+   *   7名  ■■｜■■    8名  ■■｜■■
+   *        □■｜■■         ■■｜■■
+   *        （空ける1席は窓側。左右どちらの窓側かは問いません）
+   *
    * 左右どちらに寄せるか、前後どちらに寄せるかは区別しません
    * （パズルとして解けることを優先します）。
    */
@@ -274,7 +278,10 @@
     3: { w: 3, h: 1 },
     4: { w: 2, h: 2 },
     5: { w: 3, h: 2 },
-    6: { w: 4, h: 2 }
+    6: { w: 4, h: 2 },
+    // 7名は横2列ぶんから窓側を1席だけ空けた形。8名は横2列をまるごと使う形
+    7: { w: 4, h: 2, holeAtWindow: true },
+    8: { w: 4, h: 2 }
   };
   var IDEAL_BONUS = 2.5; // 理想のかたちに収まったときの、ごほうび点（他の好みより強い）
   var ROW_LOOKAHEAD = 1; // 理想のかたちを求めて、うしろの列を何列ぶんまで見にいくか
@@ -303,7 +310,9 @@
     3: '通路をまたいだ横一列（■■｜■）',
     4: '片側に集めた正方形（■■／■■）',
     5: '正方形＋通路をまたいで1席（■■｜■／■■）',
-    6: '横一列4席＋2席（■■｜■■／■■）'
+    6: '横一列4席＋2席（■■｜■■／■■）',
+    7: '横一列4席×2列から、窓側を1席だけ空けた形',
+    8: '横一列4席×2列（2列まるごと）'
   };
 
   /**
@@ -355,10 +364,25 @@
   function cellBox(cells) {
     var rows = cells.map(function (c) { return c.row; });
     var cols = cells.map(function (c) { return c.col; });
-    return {
-      h: Math.max.apply(null, rows) - Math.min.apply(null, rows) + 1,
-      w: Math.max.apply(null, cols) - Math.min.apply(null, cols) + 1
-    };
+    var r0 = Math.min.apply(null, rows), r1 = Math.max.apply(null, rows);
+    var c0 = Math.min.apply(null, cols), c1 = Math.max.apply(null, cols);
+    return { r0: r0, r1: r1, c0: c0, c1: c1, h: r1 - r0 + 1, w: c1 - c0 + 1 };
+  }
+
+  /**
+   * 外わくの中で空いている席が、すべて窓側（かたまりの左端か右端）かどうか。
+   * 通常列で4席ぶんの幅をとると、その両端がちょうど左窓・右窓になります。
+   */
+  function holesAtWindow(cells, box) {
+    var has = {};
+    cells.forEach(function (c) { has[c.row + ',' + c.col] = true; });
+    for (var r = box.r0; r <= box.r1; r++) {
+      for (var c = box.c0; c <= box.c1; c++) {
+        if (has[r + ',' + c]) continue;
+        if (c !== box.c0 && c !== box.c1) return false;
+      }
+    }
+    return true;
   }
 
   /**
@@ -370,7 +394,9 @@
     var want = IDEAL_SHAPES[count];
     if (!want || !cells || cells.length !== count) return 0;
     var box = cellBox(cells);
-    return (box.w === want.w && box.h === want.h) ? -IDEAL_BONUS : 0;
+    if (box.w !== want.w || box.h !== want.h) return 0;
+    if (want.holeAtWindow && !holesAtWindow(cells, box)) return 0;
+    return -IDEAL_BONUS;
   }
   var MAX_WASTE = 2;      // 四角にするために空けてよい席数の上限
   var MAX_DEPTH = 2;      // かたまりの奥行き（前後に何列ぶんまで広げてよいか）
