@@ -187,6 +187,7 @@
         mark: alpha(no),
         label: label,
         frontOption: !!g.frontOption,
+        rearOption: !!g.rearOption,
         autoLabel: auto,
         usedRealName: useRealName && !!surname,
         duplicatedSurname: duplicated,
@@ -220,6 +221,8 @@
         size: size,
         members: members,
         frontOption: !!g.frontOption,
+        // 前席と後方の両方が付いていたら、前席を優先する（料金をいただいている側）
+        rearOption: !g.frontOption && !!g.rearOption,
         surname: g.surname || '',
         givenName: g.givenName || ''
       };
@@ -698,7 +701,7 @@
       // そちらを選びます（列を下げるぶんは ROW_PENALTY で割り引きます）。
       // ただし席が窮屈なとき（相席あり）は、前から詰めることを優先します。
       // 空きをまばらに残すと、大きなグループの置き場がなくなって泣き別れを招くためです。
-      var lookahead = sharing() ? 0 : ROW_LOOKAHEAD;
+      var lookahead = (sharing() || opt.backward) ? 0 : ROW_LOOKAHEAD;
       var overall = null;
       var firstHit = -1;
       for (var ri = 0; ri < rows.length; ri++) {
@@ -879,6 +882,8 @@
     function rowOrder(opt) {
       var all = [];
       for (var r = 1; r <= lastRow; r++) all.push(r);
+      // 後方のお席をご希望の組は、うしろの列から順に見ていきます
+      if (opt.backward) return all.slice().reverse();
       if (!opt.fromRow || opt.fromRow <= 1) return all;
       var k = Math.min(opt.fromRow, lastRow) - 1;
       return all.slice(k).concat(all.slice(0, k));
@@ -930,7 +935,10 @@
       while (placedCount < g.size && guard++ < 60) {
         var left = g.size - placedCount;
         var rest = g.members.slice(placedCount);
-        var base = { groupId: g.id, group: g, members: rest, fromRow: opt.fromRow };
+        var base = {
+          groupId: g.id, group: g, members: rest,
+          fromRow: opt.fromRow, backward: !!g.rearOption
+        };
         var pick = null;
 
         if (opt.origin && placedCount === 0) {
@@ -1157,7 +1165,12 @@
     // 前席オプションのグループを先に。
     // 前席組は「前3列のなか」で、それ以外は「バス全体」で、日ごとに並べ始める位置をずらす。
     var frontGroups = rotate(groups.filter(function (g) { return g.frontOption; }), frontStartIndex);
-    var restGroups = rotate(groups.filter(function (g) { return !g.frontOption; }), startIndex);
+    var restGroups = rotate(groups.filter(function (g) {
+      return !g.frontOption && !g.rearOption;
+    }), startIndex);
+    // 後方をご希望の組（大人数でにぎやかなど）は、いちばん最後に置く。
+    // 前から詰めていくので、結果としてうしろのほうに集まります。
+    var rearGroups = groups.filter(function (g) { return g.rearOption; });
 
     // 2日目以降の席替えは「前後の入れかえ」で行う。
     // 前から順に置いていくので、並べる順番をひっくり返すと
@@ -1167,7 +1180,9 @@
     // （前3列のなかでの並びは、日ごとに順ぐりにずらします）
     if (opt.reversed) restGroups = restGroups.slice().reverse();
 
-    var ordered = frontGroups.concat(restGroups);
+    // 後方をご希望の組は先に置きます。あとから置くと、前詰めのお客様に
+    // うしろまで埋められてしまい、まん中に押し出されてしまうためです。
+    var ordered = frontGroups.concat(rearGroups).concat(restGroups);
 
     // 置く順番を指定されているときは、そちらを使う（分かれてしまった組を先に置き直すため）
     if (opt.orderOverride) {
@@ -1180,7 +1195,8 @@
       });
       // 前席オプションの組は、やはり先に置く（前3列を確保するため）
       ordered = ordered.filter(function (g) { return g.frontOption; })
-        .concat(ordered.filter(function (g) { return !g.frontOption; }));
+        .concat(ordered.filter(function (g) { return g.rearOption; }))
+        .concat(ordered.filter(function (g) { return !g.frontOption && !g.rearOption; }));
     }
     day.groupOrder = ordered.map(function (g) { return g.id; });
 
@@ -1361,7 +1377,7 @@
     var now = dayRowMap(groups, day);
     var n = 0;
     groups.forEach(function (g) {
-      if (g.frontOption) return;
+      if (g.frontOption || g.rearOption) return; // どちらもご希望どおりの場所なので数えない
       if (!previousRows[g.id] || !now[g.id]) return;
       if (previousRows[g.id] >= rearFrom && now[g.id] >= rearFrom) n++;
     });
@@ -1378,7 +1394,7 @@
     var rearFrom = layout.lastRow - REAR_ROWS + 1;
     var now = dayRowMap(groups, day);
     var stuck = groups.filter(function (g) {
-      if (g.frontOption) return false;
+      if (g.frontOption || g.rearOption) return false; // ご希望どおりなので知らせる必要がない
       if (!previousRows[g.id] || !now[g.id]) return false;
       return previousRows[g.id] >= rearFrom && now[g.id] >= rearFrom;
     });
