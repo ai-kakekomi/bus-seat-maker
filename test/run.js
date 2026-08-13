@@ -433,6 +433,37 @@ test('2名グループが通路をはさんで分かれることはない', func
   checkNoAisleSplit(r3, '満席');
 });
 
+// 最前列はお客様が座れるのが2席だけ（運転席側2席が業務席）。
+// この2席は次の列とひとまとめに使えること
+test('5名・6名の組は、最前列2席＋次の列で本来のかたちに収まる', function () {
+  [[5, 3, 2], [6, 4, 2]].forEach(function (c) {
+    var r = S.assign({ layoutType: '11x45', groups: [group('g1', c[0])], days: 1 });
+    var day = r.days[0];
+    var bs = blocksOf(day, 'g1');
+    eq(bs.length, 1, c[0] + '名のブロック数');
+    eq(bs[0].row0, 1, c[0] + '名が最前列を使っていない');
+    eq(bs[0].col1 - bs[0].col0 + 1, c[1], c[0] + '名の横幅');
+    eq(bs[0].row1 - bs[0].row0 + 1, c[2], c[0] + '名の列数');
+  });
+});
+
+test('最前列に3名・4名が来たら、横一列を崩して入れる（空けたままにしない）', function () {
+  [3, 4].forEach(function (size) {
+    var r = S.assign({ layoutType: '11x45', groups: [group('g1', size)], days: 1 });
+    var day = r.days[0];
+    eq(blocksOf(day, 'g1')[0].row0, 1, size + '名が最前列を空けて後ろに回っている');
+    // 崩した形になるが、最前列では作れないのでお知らせは出さない
+    eq(day.warnings.filter(function (w) { return w.type === 'shape-differs'; }).length, 0,
+      size + '名で余計なお知らせが出ている');
+  });
+});
+
+test('窓側から埋める（通路側だけ使って窓側を空けない）', function () {
+  var r = S.assign({ layoutType: '11x45', groups: [group('g1', 3)], days: 1 });
+  var cols = r.days[0].seatsOfGroup['g1'].map(seatCol);
+  ok(cols.indexOf(1) >= 0, '左窓（col1）を空けている: col' + cols.join(','));
+});
+
 test('最後部列（5席横並び）は最終手段で、空きがあるうちは使わない', function () {
   var r = S.assign({ layoutType: '11x45', groups: [group('g1', 4), group('g2', 3)], days: 1 });
   var day = r.days[0];
@@ -1115,10 +1146,17 @@ test('ほぼ満席の見本は、1日でも5日でも全日で泣き別れゼロ
 test('巡回シフトは、分かれにくい開始位置を選ぶ（おおよそ均等に回る）', function () {
   var r = S.assign({ layoutType: '11x45', groups: fullHouseGroups(), days: 3 });
   var starts = r.days.map(function (d) { return d.startIndex; });
-  eq(starts[0], 0, '1日目は先頭から');
-  // 目標どおりでなくてもよいが、日ごとに違う位置から始まること
-  ok(starts[1] !== starts[0], '2日目が1日目と同じ開始位置');
-  ok(starts[2] !== starts[1], '3日目が2日目と同じ開始位置');
+  eq(starts[0], 0, '1日目は申し込み順どおり先頭から');
+  // 日ごとに並びが変わること。
+  // 開始位置が同じでも、反転する日としない日では並びがまるごと変わります
+  var orders = {};
+  r.days.forEach(function (d, i) {
+    var key = d.groupOrder.join(',');
+    ok(!orders[key], (i + 1) + '日目が' + orders[key] + '日目と同じ並び');
+    orders[key] = i + 1;
+  });
+  ok(starts[1] !== starts[0] || r.days[1].reversed !== r.days[0].reversed,
+    '2日目が1日目とまったく同じ決め方');
   // 全員が同じ席に固定されていないこと
   var same = 0;
   r.groups.forEach(function (g) {
@@ -1289,7 +1327,7 @@ test('後方が続かないときは、お知らせを出さない', function ()
   eq(all.length, 0, '見本の構成で余計なお知らせが出ている');
 });
 
-test('「後ろのお席にまとめる」を選んだ組は、うしろから詰める', function () {
+test('「後ろのお席にまとめる」を選んだ組は、ほかのお客様よりうしろになる', function () {
   var groups = [
     group('f1', 2, { frontOption: true }),
     group('n1', 3), group('n2', 2), group('n3', 4), group('n4', 2),
@@ -1315,11 +1353,14 @@ test('「後ろのお席にまとめる」を選んだ組は、うしろから�
       ok(frontRowOf(day, id) > normalLast,
         (di + 1) + '日目：' + id + ' がふつうの組より前にいる');
     });
-    // バスのうしろ半分にいること（まん中を避けるのが目的なので）
-    ['r1', 'r2'].forEach(function (id) {
-      ok(frontRowOf(day, id) > r.layout.rows / 2,
-        (di + 1) + '日目：' + id + ' がまん中より前にいる');
+    // 席がゆったりしていても、最後部まで飛ばすことはしない
+    // （ぽつんと離れて座るとかえって目立つため。ほかのお客様のすぐうしろに続く）
+    var lastUsed = 0;
+    Object.keys(day.placements).forEach(function (sid) {
+      if (seatRow(sid) > lastUsed) lastUsed = seatRow(sid);
     });
+    ok(lastUsed < r.layout.lastRow,
+      (di + 1) + '日目：空席が多いのに最後部列まで使っている');
   });
 
   // ご希望どおりなので「連日後方」のお知らせは出さない
