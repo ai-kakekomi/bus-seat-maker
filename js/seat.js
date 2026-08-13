@@ -1397,6 +1397,21 @@
     // 前席オプションのグループを先に。
     // 前席組は「前3列のなか」で、それ以外は「バス全体」で、日ごとに並べ始める位置をずらす。
     var frontGroups = rotate(groups.filter(function (g) { return g.frontOption; }), frontStartIndex);
+
+    // いちばん前の列は、お客様が座れるのが2席だけ（運転席側は業務席）。
+    // ここは2名の組がぴったり収まります。3名以上の組を先に置くと、
+    // 2席では収まらずに次の列へはみ出して、かたちが崩れてしまいます。
+    // そこで、前席をご希望の組のなかに2名の組があれば、その組から置きます。
+    var frontRowSeats = layout.seats.filter(function (x) {
+      return x.row === CREW_ROW && !x.isCrew;
+    }).length;
+    for (var fi = 0; fi < frontGroups.length; fi++) {
+      if (frontGroups[fi].size === frontRowSeats) {
+        frontGroups = [frontGroups[fi]].concat(
+          frontGroups.filter(function (g, k) { return k !== fi; }));
+        break;
+      }
+    }
     var restGroups = rotate(groups.filter(function (g) {
       return !g.frontOption && !g.rearOption;
     }), startIndex);
