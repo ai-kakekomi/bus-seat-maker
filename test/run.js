@@ -367,10 +367,9 @@ test('相席なしのおひとり様は窓側に座る', function () {
 
 // 混んでいても、かたちをそろえるために席をずらす（前は満席だと切っていた）。
 // 見本「ほぼ満席」と同じ構成で、崩れる組がゼロになること
-test('ほぼ満席の見本でも、かたちが崩れる組はごくわずかに収まる', function () {
-  // 画面の見本「ほぼ満席」と同じ構成。
-  // 満席でもかたちをそろえるために席をずらすようにした結果、
-  // 崩れる組は 5組 → 1組 に減りました。ここが増えたら作り直しの合図です
+test('ほぼ満席の見本は、全組が本来のかたちに収まる（テトリス最適）', function () {
+  // 画面の見本「ほぼ満席」と同じ構成。手作業の座席表と同じ結果になります。
+  // 崩れる組は 5組 → 0組。ここが増えたら作り直しの合図です
   var base = [
     group('A', 2, { frontOption: true }), group('B', 2, { frontOption: true }),
     group('C', 3, { frontOption: true }), group('D', 4, { frontOption: true }),
@@ -388,8 +387,8 @@ test('ほぼ満席の見本でも、かたちが崩れる組はごくわずか�
     var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
     eq(r.totalPeople, 42, '人数');
     var label = withFrontD ? 'Dは前席' : 'Dの前席を外す';
-    ok(S.nonIdealGroups(r.groups, r.days[0]).length <= 1,
-      label + '：かたちが崩れた組が多い（' +
+    eq(S.nonIdealGroups(r.groups, r.days[0]).length, 0,
+      label + '：かたちが崩れた組がある（' +
       S.nonIdealGroups(r.groups, r.days[0]).map(function (g) { return g.id; }).join(',') + '）');
     eq(splitGroupCount(r.days[0]), 0, label + '：分かれた組がある');
   });
@@ -969,9 +968,9 @@ test('ほぼ満席の見本では、もう泣き別れが起きない', function
 });
 
 test('分かれてしまったときは、人数と理由が分かる警告が出る', function () {
-  // 定員ぎりぎりまで大人数グループを詰めて、どうしても分かれる状況をつくる
-  var groups = [];
-  for (var i = 1; i <= 7; i++) groups.push(group('g' + i, 6)); // 42名／43席
+  // 定員ぎりぎりまで大人数グループを詰めて、どうしても分かれる状況をつくる。
+  // 12名は3列ぶん、7名は2列ぶん。43席にきれいには入りません
+  var groups = [group('g1', 12), group('g2', 12), group('g3', 12), group('g4', 7)];
   var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
   var w = r.warnings.filter(function (x) { return x.type === 'split'; });
   ok(w.length >= 1, '分割の警告が出ていない（テスト条件が不適切）');
