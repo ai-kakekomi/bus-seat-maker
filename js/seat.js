@@ -1288,12 +1288,55 @@
     return penalty;
   }
 
+  var REAR_STAY_PENALTY = 8; // 2日つづけて後方に座ってしまったグループ1組ぶんの減点
+  var REVERSE_MISS = 4;      // 前後反転をあきらめることへの減点
+  var REAR_ROWS = 2;         // うしろから何列ぶんを「後方」とみなすか
+
+  /** そのグループが座っている、いちばん前の列 */
+  function frontRowOf(day, groupId) {
+    var seats = (day.seatsOfGroup && day.seatsOfGroup[groupId]) || [];
+    var min = 0;
+    seats.forEach(function (id) {
+      var r = Number(id.slice(1).split('-')[0]);
+      if (!min || r < min) min = r;
+    });
+    return min;
+  }
+
+  /** 日ごとの、グループ→いちばん前の列 */
+  function dayRowMap(groups, day) {
+    var out = {};
+    groups.forEach(function (g) { out[g.id] = frontRowOf(day, g.id); });
+    return out;
+  }
+
+  /**
+   * 2日つづけて後方に座ってしまったグループの数。
+   *
+   * まん中のグループがあまり動かないのは、前後を入れかえるやり方の性質上あたりまえで、
+   * 現場の運用でもそう説明されています。困るのは
+   * <strong>同じお客様が毎日いちばん後ろ</strong>になることなので、そこだけを数えます。
+   * 前のお席をご希望の組は、どの日も前3列にいるので対象外です。
+   */
+  function rearStayCount(layout, groups, day, previousRows) {
+    if (!previousRows) return 0;
+    var rearFrom = layout.lastRow - REAR_ROWS + 1;
+    var now = dayRowMap(groups, day);
+    var n = 0;
+    groups.forEach(function (g) {
+      if (g.frontOption) return;
+      if (!previousRows[g.id] || !now[g.id]) return;
+      if (previousRows[g.id] >= rearFrom && now[g.id] >= rearFrom) n++;
+    });
+    return n;
+  }
+
   function buildBestDay(layout, groups, opt, target, rotatingCount) {
-    function make(startIndex) {
+    function make(startIndex, reversed) {
       var day = assignDay(layout, groups, {
         startIndex: startIndex,
         frontStartIndex: opt.frontStartIndex,
-        reversed: opt.reversed,
+        reversed: reversed,
         sharing: opt.sharing
       });
       return repackSplits(layout, groups, opt, day);
@@ -1302,7 +1345,7 @@
     // 前の日と似すぎた並びは避けたい（席替えの意味がなくなるため）。
     // ただし「分かれてしまう（分割＝100点）」ほうがずっと重い問題なので、それよりは軽い扱いです。
     var seenMaps = opt.previousSeatMaps || [];
-    function evaluate(day, startIndex) {
+    function evaluate(day, startIndex, reversed) {
       var sc = dayScore(groups, day);
       var mine = daySeatMap(day);
       var sim = 0;
@@ -1310,6 +1353,10 @@
       // 半分より多くの席がそのままなら、似ぐあいに応じて減点していく
       if (sim > 0.5) sc += (sim - 0.5) * 160;
       sc += shareFairnessPenalty(day, opt.shareHistory);
+      // 2日つづけて後方になってしまった組があれば、その数だけ減点
+      sc += rearStayCount(layout, groups, day, opt.previousRows) * REAR_STAY_PENALTY;
+      // 前後反転をあきらめた場合の減点（反転が席替えにならないときだけ、これを払って乗り換える）
+      if (reversed !== !!opt.reversed) sc += REVERSE_MISS;
       var dist = Math.min(
         Math.abs(startIndex - target),
         rotatingCount - Math.abs(startIndex - target)
@@ -1317,8 +1364,8 @@
       return sc + dist * 0.01; // 同じ出来ばえなら、目標に近い開始位置を選ぶ
     }
 
-    var best = make(target);
-    var bestScore = evaluate(best, target);
+    var best = make(target, !!opt.reversed);
+    var bestScore = evaluate(best, target, !!opt.reversed);
     if (bestScore === 0 || rotatingCount <= 1) return best;
 
     // 試す順番：目標のすぐ近く（±3組）→ それでもだめなら全部の開始位置
@@ -1334,14 +1381,29 @@
       if (!seen[k]) { seen[k] = true; order.push(k); }
     }
 
+    // まずは決められたやり方（反転する日は反転）のなかで、いちばんよい開始位置を探す
     for (var i = 0; i < order.length; i++) {
-      var cand = make(order[i]);
-      var sc = evaluate(cand, order[i]);
+      var cand = make(order[i], !!opt.reversed);
+      var sc = evaluate(cand, order[i], !!opt.reversed);
       if (sc < bestScore) {
         best = cand;
         bestScore = sc;
-        if (bestScore === 0) break; // 文句なしの並びが見つかった
+        if (bestScore === 0) return best; // 文句なしの並びが見つかった
       }
+    }
+
+    // それでも「2日つづけて後方」の組が残るなら、反転をあきらめる手も試す。
+    // 席が窮屈で、反転したままでは後ろの人を前に出せないときの逃げ道です。
+    if (opt.previousRows && rearStayCount(layout, groups, best, opt.previousRows) > 0) {
+      var alt = !opt.reversed;
+      for (var j = 0; j < order.length; j++) {
+        var c2 = make(order[j], alt);
+        var s2 = evaluate(c2, order[j], alt);
+        if (s2 < bestScore) { best = c2; bestScore = s2; }
+      }
+      var c3 = make(target, alt);
+      var s3 = evaluate(c3, target, alt);
+      if (s3 < bestScore) { best = c3; bestScore = s3; }
     }
     return best;
   }
@@ -2058,6 +2120,7 @@
         reversed: d % 2 === 1,
         sharing: sharing,
         shareHistory: d > 0 ? shareHistory : null,
+        previousRows: d > 0 ? dayRowMap(groups, days[d - 1]) : null,
         previousSeatMaps: days.map(daySeatMap)
       }, startIndexForDay(rotating, pairIndex, dayCount), rotating.length);
       day.dayIndex = d;
