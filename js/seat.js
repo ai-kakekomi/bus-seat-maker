@@ -1731,6 +1731,26 @@
   }
 
   /**
+   * 2日つづけて「うしろ半分」に座ってしまった組の数。
+   *
+   * rearStayCount() が見るのは最後部の2列だけですが、現場の感覚は
+   * 「うしろのほうが2日つづいた」です（前後反転は、うしろの人を前へ送るための決まり）。
+   * こちらはテトリス方式の出来ばえに使い、お知らせ文には使いません。
+   */
+  function rearHalfStayCount(layout, groups, day, previousRows) {
+    if (!previousRows) return 0;
+    var half = Math.ceil(layout.lastRow / 2) + 1;
+    var now = dayRowMap(groups, day);
+    var n = 0;
+    groups.forEach(function (g) {
+      if (g.frontOption || g.rearOption) return; // どちらもご希望どおりの場所
+      if (!previousRows[g.id] || !now[g.id]) return;
+      if (previousRows[g.id] >= half && now[g.id] >= half) n++;
+    });
+    return n;
+  }
+
+  /**
    * 「2日つづけて後方」のお知らせ文。該当なしなら null。
    * day.previousRows（前の日の、グループごとのいちばん前の列）が入っているときだけ働きます。
    */
@@ -2920,6 +2940,7 @@
 
   var TETRIS_FRONT_OUT = 50; // 前席をご希望の組が前3列から出てしまうことへの減点
   var TETRIS_REAR_STAY = 16; // 2日つづけて後方に座ってしまった組1組ぶんの減点
+  var TETRIS_REAR_HALF = 6; // 2日つづけて「うしろ半分」に座ってしまった組1組ぶんの減点
   var TETRIS_ORDER_DRIFT = 0.2; // 申し込み順から1組ぶん離れることへの減点
 
   /**
@@ -2966,9 +2987,12 @@
     });
     // 前の日につづけて後方になってしまった組の数
     var stay = previousRows ? rearStayCount(layout, groups, day, previousRows) : 0;
+    // 最後部の2列までいかなくても、「うしろ半分が2日つづく」のは席替えになっていない
+    var halfStay = previousRows ? rearHalfStayCount(layout, groups, day, previousRows) : 0;
 
     return (want - seated) * 10000 + split * 100 + frontOut * TETRIS_FRONT_OUT +
       nonIdealGroups(groups, day).length * 10 + stay * TETRIS_REAR_STAY +
+      halfStay * TETRIS_REAR_HALF +
       rear * 3 + drift * TETRIS_ORDER_DRIFT;
   }
 
@@ -3040,7 +3064,8 @@
     // 前席オプションのはみ出しは、前3列の席数が足りなければどうにもならないので、
     // ここには数えません（出来ばえの点数では見ています）
     var stay = previousRows ? rearStayCount(layout, groups, day, previousRows) : 0;
-    return (want - seated) + split + stay + nonIdealGroups(groups, day).length;
+    var halfStay = previousRows ? rearHalfStayCount(layout, groups, day, previousRows) : 0;
+    return (want - seated) + split + stay + halfStay + nonIdealGroups(groups, day).length;
   }
 
   /**
