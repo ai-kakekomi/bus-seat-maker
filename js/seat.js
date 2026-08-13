@@ -418,8 +418,11 @@
       var b = box[g.id];
       if (b.people !== g.size) return false; // 取り置き空席つきの枠は別の話
       // 最前列は運転席側の2席が業務席なので、お客様が座れるのは2席だけ。
-      // ここにかかるグループは、そもそも理想のかたちを作れないので数えません
+      // 最後部列は5席が地つづきで通路がない。
+      // どちらも「4席の列」を前提にした理想のかたちが当てはまらないので数えません
+      //（5名がぴったり収まる最後部列を「崩れている」と言われても困るため）
       if (b.row0 <= CREW_ROW) return false;
+      if (day.lastRow && b.row1 >= day.lastRow) return false;
       return (b.col1 - b.col0 + 1) !== want.w || (b.row1 - b.row0 + 1) !== want.h;
     });
   }
@@ -1167,6 +1170,7 @@
       var gid = day.placements[sid].groupId;
       (day.seatsOfGroup[gid] = day.seatsOfGroup[gid] || []).push(sid);
     });
+    day.lastRow = layout.lastRow; // 最後部列は理想のかたちの対象外にするため
     day.shared = sharedPairs(layout, day);
     day.blocks = computeBlocks(layout, day);
     day.freeArea = freeAreaBlock(layout, day);
@@ -1268,6 +1272,15 @@
     // （前3列のなかでの並びは、日ごとに順ぐりにずらします）
     if (opt.reversed) restGroups = restGroups.slice().reverse();
 
+    // 申し込み順どおりだと詰め切れない構成のための、もうひとつの並べ方。
+    // 大きい組から先に置くと、大きなかたまりの置き場を先に確保できます
+    //（日ごとの入れかえは、大きい順と小さい順を入れかえることで作ります）
+    if (opt.sizeOrder) {
+      restGroups = restGroups.slice().sort(function (a, b) {
+        return opt.reversed ? a.size - b.size : b.size - a.size;
+      });
+    }
+
     // 後方をご希望の組は、いちばん最後に置きます。前から詰めていくので、
     // 結果としてほかのお客様のうしろになります。
     // 席がゆったりしているときに、わざわざ最後部まで飛ばすことはしません
@@ -1360,9 +1373,11 @@
     var odd = day.warnings.filter(function (w) {
       return w.type === 'odd-shape' || w.type === 'deep-block';
     }).length;
-    // 理想のかたちに収まらなかった組の数。かたちより「離れないこと」がずっと大事なので、軽い重み
+    // 理想のかたちに収まらなかった組の数。
+    // 泣き別れ（×100）よりはずっと軽いが、現場が実際に見るところなので、
+    // 「置き方をちょっと変えれば直る」程度の理由では譲らない重みにしてあります
     var offShape = nonIdealGroups(groups, day).length;
-    return (want - seated) * 10000 + split * 100 + mixed * 5 + odd + offShape * 0.5;
+    return (want - seated) * 10000 + split * 100 + mixed * 5 + odd + offShape * OFF_SHAPE;
   }
 
   /** 分かれてしまった組を先に置き直して、解けるかどうかもう一度試す */
@@ -1441,7 +1456,8 @@
   var REAR_STAY_PENALTY = 8; // 2日つづけて後方に座ってしまったグループ1組ぶんの減点
   var REVERSE_MISS = 4;      // 前後反転をあきらめることへの減点
   var REAR_ROWS = 2;         // うしろから何列ぶんを「後方」とみなすか
-  var START_DRIFT = 0.05;    // 目標の開始位置から1組ぶんずれることへの減点（同点崩し程度）
+  var START_DRIFT = 1;       // 目標の開始位置から1組ぶんずれることへの減点
+  var OFF_SHAPE = 2;         // 理想のかたちに収まらなかったグループ1組ぶんの減点
 
   /** そのグループが座っている、いちばん前の列 */
   function frontRowOf(day, groupId) {
@@ -1510,13 +1526,23 @@
   }
 
   function buildBestDay(layout, groups, opt, target, rotatingCount) {
-    function make(startIndex, reversed, noLookahead) {
+    // 試す並べ方。うしろにいくほど「ふつうでない」ので、同じ出来ばえなら先のものが選ばれます
+    var WAYS = [
+      { noLookahead: false, sizeOrder: false }, // 申し込み順・かたち優先
+      { noLookahead: true, sizeOrder: false },  // 申し込み順・前から詰める
+      { noLookahead: false, sizeOrder: true },  // 大きい組から・かたち優先
+      { noLookahead: true, sizeOrder: true }    // 大きい組から・前から詰める
+    ];
+
+    function make(startIndex, reversed, way) {
+      way = way || WAYS[0];
       var day = assignDay(layout, groups, {
         startIndex: startIndex,
         frontStartIndex: opt.frontStartIndex,
         reversed: reversed,
         sharing: opt.sharing,
-        noLookahead: noLookahead
+        noLookahead: way.noLookahead,
+        sizeOrder: way.sizeOrder
       });
       return repackSplits(layout, groups, opt, day);
     }
@@ -1540,12 +1566,13 @@
         Math.abs(startIndex - target),
         rotatingCount - Math.abs(startIndex - target)
       );
-      // 出来ばえが同じなら、目標の開始位置に近いほうを選びます。
-      // ここを重くすると「申し込み順どおり」を守るために形が崩れるので、軽くしてあります
+      // 目標の開始位置からずれると、申し込み順と座席の並びがちぐはぐになります。
+      // 並べ方（大きい組から置く等）を変えれば同じ出来ばえに届くことが多いので、
+      // 開始位置をずらすのは最後にしたい。そのぶんの重みです
       return sc + dist * START_DRIFT;
     }
 
-    var best = make(target, !!opt.reversed);
+    var best = make(target, !!opt.reversed, WAYS[0]);
     var bestScore = evaluate(best, target, !!opt.reversed);
     if (bestScore === 0 || rotatingCount <= 1) return best;
 
@@ -1566,9 +1593,17 @@
     // 「かたちをそろえるために席をずらす」のを使う版と使わない版の両方を試します。
     // ずらす版はかたちがきれいになりますが、詰め方が変わるので、
     // 構成によっては泣き別れが出たり、前の日と同じ並びしか作れなくなったりします。
-    for (var pass = 0; pass < 2; pass++) {
+    for (var pass = 0; pass < WAYS.length; pass++) {
+      // 目標の開始位置で、まず全部の並べ方を試す
+      var atTarget = make(target, !!opt.reversed, WAYS[pass]);
+      var atScore = evaluate(atTarget, target, !!opt.reversed);
+      if (atScore < bestScore) {
+        best = atTarget;
+        bestScore = atScore;
+        if (bestScore === 0) return best;
+      }
       for (var i = 0; i < order.length; i++) {
-        var cand = make(order[i], !!opt.reversed, pass === 1);
+        var cand = make(order[i], !!opt.reversed, WAYS[pass]);
         var sc = evaluate(cand, order[i], !!opt.reversed);
         if (sc < bestScore) {
           best = cand;
@@ -1582,13 +1617,13 @@
     // 席が窮屈で、反転したままでは後ろの人を前に出せないときの逃げ道です。
     if (opt.previousRows && rearStayCount(layout, groups, best, opt.previousRows) > 0) {
       var alt = !opt.reversed;
-      for (var ap = 0; ap < 2; ap++) {
+      for (var ap = 0; ap < WAYS.length; ap++) {
         for (var j = 0; j < order.length; j++) {
-          var c2 = make(order[j], alt, ap === 1);
+          var c2 = make(order[j], alt, WAYS[ap]);
           var s2 = evaluate(c2, order[j], alt);
           if (s2 < bestScore) { best = c2; bestScore = s2; }
         }
-        var c3 = make(target, alt, ap === 1);
+        var c3 = make(target, alt, WAYS[ap]);
         var s3 = evaluate(c3, target, alt);
         if (s3 < bestScore) { best = c3; bestScore = s3; }
       }
