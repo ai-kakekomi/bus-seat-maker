@@ -1223,7 +1223,7 @@ test('人数の割合で並べ始める位置を決める（グループは切�
   eq(starts(groups, 2).join(','), '0,3', '並べ始めるグループ');
 });
 
-test('前席オプション組は入れかえの対象外。前3列のなかで日ごとに順ぐりに動く', function () {
+test('前席オプション組も、2日目は逆順になる（同じ組が毎日いちばん前にならない）', function () {
   var groups = [
     group('f1', 2, { frontOption: true }),
     group('f2', 2, { frontOption: true }),
@@ -1234,7 +1234,7 @@ test('前席オプション組は入れかえの対象外。前3列のなかで�
 
   // 日ごとに前席組の並び順が変わる
   eq(r.days[0].groupOrder.slice(0, 3).join(','), 'f1,f2,f3', '1日目の前席組');
-  eq(r.days[1].groupOrder.slice(0, 3).join(','), 'f2,f3,f1', '2日目の前席組');
+  eq(r.days[1].groupOrder.slice(0, 3).join(','), 'f1,f3,f2', '2日目の前席組（順ぐりのうえ逆順）');
   eq(r.days[2].groupOrder.slice(0, 3).join(','), 'f3,f1,f2', '3日目の前席組');
 
   // どの日も、前席組は前から3列目までに収まっている
@@ -1246,10 +1246,10 @@ test('前席オプション組は入れかえの対象外。前3列のなかで�
     });
   });
 
-  // f1 は毎日同じ席ではない
-  var f1 = r.days.map(function (d) { return d.seatsOfGroup['f1'].slice().sort().join(','); });
-  ok(f1[0] !== f1[1], 'f1が1日目と2日目で同じ席');
-  ok(f1[1] !== f1[2], 'f1が2日目と3日目で同じ席');
+  // 前席組の並びは、日ごとに変わる
+  var orders = r.days.map(function (d) { return d.groupOrder.slice(0, 3).join(','); });
+  ok(orders[0] !== orders[1], '1日目と2日目で前席組の並びが同じ');
+  ok(orders[1] !== orders[2], '2日目と3日目で前席組の並びが同じ');
 });
 
 test('前席オプションが1組だけなら実質固定でよい', function () {
