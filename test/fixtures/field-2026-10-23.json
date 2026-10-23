@@ -1,0 +1,632 @@
+{
+ "source": "2026-10-23 添乗員さんの実運用フィードバック（スクリーンショットから組み立て直した推定。日数・申し込み順・一部の性別は推定）。名字は実在のお客様の可能性があるので、客01〜の記号に置き換えた（同じ記号は同じ組）",
+ "cases": [
+  {
+   "id": "field-1023-a",
+   "note": "画像01〜03。15組・43名（満席）。縦に2名・3名が並んだ。申し込み順はスクリーンショットの1日目の並びから推定。お客様O＝15番目",
+   "layoutType": "11x45",
+   "days": 3,
+   "groups": [
+    {
+     "surname": "客01",
+     "size": 2,
+     "members": [
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ],
+     "frontOption": true
+    },
+    {
+     "surname": "客02",
+     "size": 2,
+     "members": [
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ],
+     "frontOption": true
+    },
+    {
+     "surname": "客03",
+     "size": 3,
+     "members": [
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "female"
+      }
+     ]
+    },
+    {
+     "surname": "客04",
+     "size": 1,
+     "members": [
+      {
+       "gender": "male"
+      }
+     ]
+    },
+    {
+     "surname": "客05",
+     "size": 3,
+     "members": [
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "male"
+      }
+     ]
+    },
+    {
+     "surname": "客06",
+     "size": 1,
+     "members": [
+      {
+       "gender": "male"
+      }
+     ]
+    },
+    {
+     "surname": "客07",
+     "size": 7,
+     "members": [
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ]
+    },
+    {
+     "surname": "客08",
+     "size": 2,
+     "members": [
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ]
+    },
+    {
+     "surname": "客09",
+     "size": 5,
+     "members": [
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "unknown"
+      }
+     ]
+    },
+    {
+     "surname": "客10",
+     "size": 6,
+     "members": [
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "female"
+      }
+     ]
+    },
+    {
+     "surname": "客11",
+     "size": 2,
+     "members": [
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ]
+    },
+    {
+     "surname": "客12",
+     "size": 2,
+     "members": [
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ]
+    },
+    {
+     "surname": "客13",
+     "size": 2,
+     "members": [
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ]
+    },
+    {
+     "surname": "客14",
+     "size": 3,
+     "members": [
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "female"
+      }
+     ]
+    },
+    {
+     "surname": "",
+     "size": 2,
+     "members": [
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "field-1023-b",
+   "note": "画像04。14組・43名（満席）。4名の組が縦一列に並んだ。お客様N＝14番目",
+   "layoutType": "11x45",
+   "days": 3,
+   "groups": [
+    {
+     "surname": "客01",
+     "size": 2,
+     "members": [
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ],
+     "frontOption": true
+    },
+    {
+     "surname": "客02",
+     "size": 2,
+     "members": [
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ],
+     "frontOption": true
+    },
+    {
+     "surname": "客11",
+     "size": 2,
+     "members": [
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ]
+    },
+    {
+     "surname": "客06",
+     "size": 1,
+     "members": [
+      {
+       "gender": "male"
+      }
+     ]
+    },
+    {
+     "surname": "客04",
+     "size": 1,
+     "members": [
+      {
+       "gender": "male"
+      }
+     ]
+    },
+    {
+     "surname": "客10",
+     "size": 6,
+     "members": [
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "female"
+      }
+     ]
+    },
+    {
+     "surname": "客07",
+     "size": 7,
+     "members": [
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ]
+    },
+    {
+     "surname": "客05",
+     "size": 3,
+     "members": [
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "male"
+      }
+     ]
+    },
+    {
+     "surname": "客03",
+     "size": 3,
+     "members": [
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "female"
+      }
+     ]
+    },
+    {
+     "surname": "客13",
+     "size": 4,
+     "members": [
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ]
+    },
+    {
+     "surname": "客09",
+     "size": 5,
+     "members": [
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "unknown"
+      }
+     ]
+    },
+    {
+     "surname": "客08",
+     "size": 2,
+     "members": [
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ]
+    },
+    {
+     "surname": "客15",
+     "size": 3,
+     "members": [
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "female"
+      }
+     ]
+    },
+    {
+     "surname": "",
+     "size": 2,
+     "members": [
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "field-1023-c",
+   "note": "画像05。11組・33名（空席10）。空きがあるのに最後部の真ん中（11-3）を使った。A から見えない4組を外した推定",
+   "layoutType": "11x45",
+   "days": 3,
+   "groups": [
+    {
+     "surname": "客01",
+     "size": 2,
+     "members": [
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ],
+     "frontOption": true
+    },
+    {
+     "surname": "客02",
+     "size": 2,
+     "members": [
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ],
+     "frontOption": true
+    },
+    {
+     "surname": "客04",
+     "size": 1,
+     "members": [
+      {
+       "gender": "male"
+      }
+     ]
+    },
+    {
+     "surname": "客06",
+     "size": 1,
+     "members": [
+      {
+       "gender": "male"
+      }
+     ]
+    },
+    {
+     "surname": "客07",
+     "size": 7,
+     "members": [
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ]
+    },
+    {
+     "surname": "客09",
+     "size": 5,
+     "members": [
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "unknown"
+      }
+     ]
+    },
+    {
+     "surname": "客10",
+     "size": 6,
+     "members": [
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "female"
+      },
+      {
+       "gender": "female"
+      }
+     ]
+    },
+    {
+     "surname": "客11",
+     "size": 2,
+     "members": [
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ]
+    },
+    {
+     "surname": "客12",
+     "size": 2,
+     "members": [
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ]
+    },
+    {
+     "surname": "客13",
+     "size": 2,
+     "members": [
+      {
+       "gender": "unknown"
+      },
+      {
+       "gender": "unknown"
+      }
+     ]
+    },
+    {
+     "surname": "客14",
+     "size": 3,
+     "members": [
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "male"
+      },
+      {
+       "gender": "female"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
