@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>座席表メーカー デバッグ</title>
+<meta name="robots" content="noindex">
+<style>
+:root {
+  --fg: #1d2429; --muted: #5a666f; --bg: #f4f6f8; --card: #fff; --line: #d3dae0;
+  --accent: #1c5f4a; --error: #b3261e; --error-bg: #fdecea; --ok: #1e6b3a; --ok-bg: #e6f4ea;
+  --warn: #8a5a00; --warn-bg: #fff5e0;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.6 system-ui, "Hiragino Sans", "Yu Gothic UI", sans-serif; }
+header { background: var(--accent); color: #fff; padding: 12px 16px; }
+header h1 { margin: 0; font-size: 18px; }
+header p { margin: 2px 0 0; font-size: 13px; opacity: .85; }
+nav { display: flex; gap: 4px; padding: 8px 16px 0; flex-wrap: wrap; }
+nav button { border: 1px solid var(--line); border-bottom: none; background: #e9edf0; padding: 6px 14px; border-radius: 8px 8px 0 0; font: inherit; cursor: pointer; }
+nav button[aria-selected="true"] { background: var(--card); font-weight: 700; }
+main { background: var(--card); border-top: 1px solid var(--line); padding: 16px; min-height: 70vh; }
+section[hidden] { display: none; }
+h2 { font-size: 16px; margin: 0 0 8px; }
+.note { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 12px; }
+.controls label { font-size: 13px; }
+.controls select, .controls input { font: inherit; padding: 2px 4px; }
+button.run { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 6px 16px; font: inherit; cursor: pointer; }
+button.run:disabled { opacity: .5; }
+:focus-visible { outline: 3px solid #f0a020; outline-offset: 2px; }
+
+/* 座席の図 */
+.bus { display: inline-grid; grid-template-columns: repeat(2, var(--s)) var(--a) repeat(2, var(--s)); gap: 3px; --s: 46px; --a: 34px; }
+.bus .seat { height: calc(var(--s) * .78); border-radius: 5px; border: 1px solid var(--line); font-size: 11px; line-height: 1.15; padding: 2px 3px; position: relative; overflow: hidden; background: #fafbfc; }
+.bus .seat .who { font-weight: 700; font-size: 12px; }
+.bus .seat .g { position: absolute; right: 3px; bottom: 1px; font-size: 11px; }
+.bus .seat.crew { background: repeating-linear-gradient(45deg, #eceff1, #eceff1 4px, #f7f8f9 4px, #f7f8f9 8px); color: var(--muted); }
+.bus .seat.bad { outline: 3px solid var(--error); outline-offset: -1px; }
+.bus .seat.mid { box-shadow: inset 0 0 0 2px #f0a020; }
+.bus .rowno { font-size: 10px; color: var(--muted); text-align: center; align-self: center; }
+.bus .last { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
+.bus.mini { --s: 13px; --a: 8px; gap: 1px; }
+.bus.mini .seat { height: 10px; border-radius: 2px; padding: 0; font-size: 0; border-width: 0; }
+.bus.mini .rowno { font-size: 0; }
+.bus.mini .last { gap: 1px; }
+
+/* かたちの一覧 */
+.shapes { display: grid; grid-template-columns: 70px repeat(3, minmax(150px, 1fr)); gap: 8px; align-items: start; }
+.shapes .h { font-weight: 700; font-size: 13px; color: var(--muted); }
+.shape { border-radius: 8px; padding: 6px 8px; border: 1px solid var(--line); }
+.shape.ok { background: var(--ok-bg); border-color: #9cc9a8; }
+.shape.fb { background: var(--warn-bg); border-color: #e5c27a; }
+.shape.ng { background: var(--error-bg); border-color: #e6a39e; }
+.shape .cap { font-size: 12px; margin-bottom: 4px; }
+.shape .bus { --s: 34px; --a: 18px; }
+.shape .bus .seat { height: 24px; padding: 0; }
+.shape .bus .seat.on { background: #4b7f6b; border-color: #4b7f6b; }
+.shape.ng .bus .seat.on { background: var(--error); border-color: var(--error); }
+.shape.fb .bus .seat.on { background: #c58a16; border-color: #c58a16; }
+
+/* 一覧と詳細 */
+.wall { display: flex; flex-wrap: wrap; gap: 8px; }
+.card { border: 2px solid var(--line); border-radius: 8px; padding: 6px; background: var(--card); cursor: pointer; text-align: left; font: inherit; }
+.card.bad { border-color: var(--error); background: var(--error-bg); }
+.card .t { font-size: 11px; color: var(--muted); max-width: 120px; }
+.card .n { font-size: 12px; font-weight: 700; }
+.card.bad .n { color: var(--error); }
+.summary { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 8px 0 12px; font-size: 14px; }
+.summary b.bad { color: var(--error); }
+.summary b.good { color: var(--ok); }
+.detail { margin-top: 16px; border-top: 2px solid var(--line); padding-top: 12px; }
+.days { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.day h3 { font-size: 14px; margin: 0 0 4px; }
+.day ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--error); max-width: 260px; }
+.day .pass { color: var(--ok); font-size: 13px; margin-top: 6px; }
+.legend { font-size: 12px; color: var(--muted); margin: 6px 0; }
+.legend span { display: inline-block; margin-right: 10px; }
+pre.json { background: #f6f8fa; border: 1px solid var(--line); padding: 8px; font-size: 11px; max-height: 160px; overflow: auto; }
+@media (max-width: 640px) {
+  .shapes { grid-template-columns: 1fr; }
+  .shapes .h { margin-top: 8px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>座席表メーカー デバッグ</h1>
+  <p>出来あがった座席表が、決まり（docs/アルゴリズム.md）を守れているかを、目と機械で確かめる画面です。</p>
+</header>
+<nav role="tablist">
+  <button role="tab" data-tab="stress" aria-selected="true">大量テスト</button>
+  <button role="tab" data-tab="field" aria-selected="false">添乗員さんの入力</button>
+  <button role="tab" data-tab="shapes" aria-selected="false">かたちの一覧</button>
+</nav>
+<main>
+  <section id="tab-stress">
+    <h2>大量テスト</h2>
+    <p class="note">ランダムな申し込みを作って配置し、決まりの違反を数えます。赤い枠が違反のあった件です。クリックすると、日ごとの座席表を開きます。同じ番号（シード）からは、いつも同じ申し込みができます。</p>
+    <div class="controls">
+      <label>組の構成 <select id="profile"><option>ふだん</option><option>意地悪</option><option value="mix" selected>両方</option></select></label>
+      <label>空席 <select id="spare"><option value="all" selected>0・1・2・4・8</option><option>0</option><option>1</option><option>2</option><option>4</option><option>8</option></select></label>
+      <label>日数 <select id="days"><option value="all" selected>1〜4日</option><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
+      <label>バス <select id="layout"><option value="all" selected>両方</option><option>11x45</option><option>12x49</option></select></label>
+      <label>件数 <input id="count" type="number" min="1" max="2000" value="60" style="width:5em"></label>
+      <label>最初の番号 <input id="seed" type="number" min="1" value="1" style="width:5em"></label>
+      <label><input id="onlyBad" type="checkbox" checked> 違反のある件だけ</label>
+      <button class="run" id="run">流す</button>
+    </div>
+    <div class="summary" id="summary"></div>
+    <div class="wall" id="wall"></div>
+    <div class="detail" id="detail" hidden></div>
+  </section>
+
+  <section id="tab-field" hidden>
+    <h2>添乗員さんの入力（2026-10-23）</h2>
+    <p class="note">添乗員さんのスクリーンショットから組み立て直した入力です（test/fixtures/field-2026-10-23.json。名字はありふれたものに置き換え済み）。ここで違反が0件になることが合格の条件です。</p>
+    <div id="field"></div>
+  </section>
+
+  <section id="tab-shapes" hidden>
+    <h2>かたちの一覧</h2>
+    <p class="note">人数ごとに、使ってよいかたちを上から優先順に並べています。緑＝1番、黄＝フォールバック（【要確認】を含む）、赤＝使わない。縦並び（1人ずつの列が前後に続く）は、フォールバックでも使いません。</p>
+    <div class="shapes" id="shapes"></div>
+  </section>
+</main>
+
+<script src="js/seat.js"></script>
+<script src="js/checks.js"></script>
+<script src="js/gen.js"></script>
+<script>
+(function () {
+  'use strict';
+  var S = window.BusSeat, C = window.BusSeatChecks, G = window.BusSeatGen;
+  function $(id) { return document.getElementById(id); }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  /* ---------- タブ ---------- */
+  document.querySelectorAll('nav button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('nav button').forEach(function (x) {
+        x.setAttribute('aria-selected', x === b ? 'true' : 'false');
+        $('tab-' + x.dataset.tab).hidden = x !== b;
+      });
+      if (b.dataset.tab === 'field') loadField();
+    });
+  });
+
+  /* ---------- 色 ---------- */
+  function colorOf(i) {
+    var h = (i * 47) % 360;
+    return { bg: 'hsl(' + h + ' 70% 88%)', line: 'hsl(' + h + ' 45% 45%)' };
+  }
+  function letter(order) { return String.fromCharCode(65 + (order % 26)); }
+  var GENDER = { male: '男', female: '女', unknown: '' };
+
+  /* ---------- 座席の図 ---------- */
+  function drawBus(layout, groups, day, opt) {
+    opt = opt || {};
+    var byId = {};
+    groups.forEach(function (g) { byId[g.id] = g; });
+    var badGroups = {};
+    (opt.violations || []).forEach(function (v) { if (v.groupId) badGroups[v.groupId] = true; });
+    var rearMid = (opt.violations || []).some(function (v) { return v.type === 'rear-middle'; });
+    var bus = el('div', 'bus' + (opt.mini ? ' mini' : ''));
+
+    function seatEl(s) {
+      var d = el('div', 'seat');
+      if (s.isCrew) { d.classList.add('crew'); if (!opt.mini) d.textContent = '業務'; return d; }
+      var p = day.placements[s.id];
+      if (!p) return d;
+      var g = byId[p.groupId];
+      var c = colorOf(g.order);
+      d.style.background = c.bg;
+      d.style.borderColor = c.line;
+      if (badGroups[g.id]) d.classList.add('bad');
+      if (rearMid && s.row === layout.lastRow && s.col === 3) d.classList.add('mid');
+      if (!opt.mini) {
+        d.appendChild(el('div', 'who', letter(g.order) + (g.frontOption ? '★' : '')));
+        d.appendChild(el('div', '', (g.surname || '') + g.size + '名'));
+        d.appendChild(el('span', 'g', GENDER[p.gender] || ''));
+      }
+      d.title = (g.surname || 'お客様' + letter(g.order)) + ' ' + g.size + '名';
+      return d;
+    }
+
+    for (var r = 1; r <= layout.lastRow; r++) {
+      var seats = layout.seats.filter(function (s) { return s.row === r; });
+      if (r < layout.lastRow) {
+        bus.appendChild(seatEl(seats[0]));
+        bus.appendChild(seatEl(seats[1]));
+        bus.appendChild(el('div', 'rowno', r + '列目'));
+        bus.appendChild(seatEl(seats[2]));
+        bus.appendChild(seatEl(seats[3]));
+      } else {
+        var last = el('div', 'last');
+        seats.forEach(function (s) { last.appendChild(seatEl(s)); });
+        bus.appendChild(last);
+      }
+    }
+    return bus;
+  }
+
+  function run(c) {
+    var res = S.assign({ layoutType: c.layoutType, groups: JSON.parse(JSON.stringify(c.groups)), days: c.days });
+    var perDay = res.days.map(function (day) { return C.inspect(res.layout, res.groups, day); });
+    return { res: res, perDay: perDay, total: perDay.reduce(function (s, v) { return s + v.length; }, 0) };
+  }
+
+  function drawDetail(target, c, out) {
+    target.innerHTML = '';
+    var head = el('h2', '', c.id + '（' + out.res.totalPeople + '名・空席' + out.res.spareSeats + '・' + c.days + '日）');
+    target.appendChild(head);
+    var legend = el('div', 'legend');
+    out.res.groups.forEach(function (g) {
+      legend.appendChild(el('span', '', letter(g.order) + '=' + (g.surname || '') + g.size + '名' + (g.frontOption ? '★前席' : '')));
+    });
+    target.appendChild(legend);
+    var days = el('div', 'days');
+    out.res.days.forEach(function (day, d) {
+      var box = el('div', 'day');
+      box.appendChild(el('h3', '', (d + 1) + '日目'));
+      box.appendChild(drawBus(out.res.layout, out.res.groups, day, { violations: out.perDay[d] }));
+      if (out.perDay[d].length) {
+        var ul = el('ul');
+        out.perDay[d].forEach(function (v) { ul.appendChild(el('li', '', v.message)); });
+        box.appendChild(ul);
+      } else {
+        box.appendChild(el('div', 'pass', '✓ 違反なし'));
+      }
+      days.appendChild(box);
+    });
+    target.appendChild(days);
+    var det = el('details');
+    det.appendChild(el('summary', '', '入力データ（JSON。テストデータに足すときに使う）'));
+    det.appendChild(el('pre', 'json', JSON.stringify(c, null, 1)));
+    target.appendChild(det);
+  }
+
+  /* ---------- 大量テスト ---------- */
+  var SPARES = [0, 1, 2, 4, 8];
+  function pick(v, all, i) { return v === 'all' || v === 'mix' ? all[i % all.length] : v; }
+
+  $('run').addEventListener('click', function () {
+    var n = Math.max(1, Math.min(2000, Number($('count').value) || 60));
+    var seed0 = Math.max(1, Number($('seed').value) || 1);
+    var onlyBad = $('onlyBad').checked;
+    var wall = $('wall'), sum = $('summary');
+    wall.innerHTML = '';
+    $('detail').hidden = true;
+    $('run').disabled = true;
+    var counts = {}, badCases = 0, done = 0, t0 = Date.now();
+
+    function step(i) {
+      if (i >= n) {
+        $('run').disabled = false;
+        showSummary(true);
+        return;
+      }
+      var layoutType = String(pick($('layout').value, ['11x45', '11x45', '11x45', '12x49'], i));
+      var c = G.makeCase({
+        seed: seed0 + i,
+        profile: pick($('profile').value, ['ふだん', '意地悪'], i),
+        spare: Number(pick($('spare').value, SPARES, i)),
+        days: Number(pick($('days').value, [1, 2, 3, 4], i)),
+        layoutType: layoutType,
+        usable: S.buildLayout(layoutType).usableSeatCount
+      });
+      var out = run(c);
+      done++;
+      out.perDay.forEach(function (vs) { vs.forEach(function (v) { counts[v.type] = (counts[v.type] || 0) + 1; }); });
+      if (out.total) badCases++;
+      if (out.total || !onlyBad) {
+        var card = el('button', 'card' + (out.total ? ' bad' : ''));
+        card.appendChild(el('div', 'n', out.total ? '違反 ' + out.total : '✓'));
+        card.appendChild(drawBus(out.res.layout, out.res.groups, out.res.days[0], { mini: true, violations: out.perDay[0] }));
+        card.appendChild(el('div', 't', c.id));
+        card.addEventListener('click', function () {
+          var det = $('detail');
+          det.hidden = false;
+          drawDetail(det, c, out);
+          det.scrollIntoView({ behavior: 'smooth' });
+        });
+        wall.appendChild(card);
+      }
+      if (done % 5 === 0) showSummary(false);
+      setTimeout(function () { step(i + 1); }, 0);
+    }
+
+    var NAMES = { vertical: '縦並び', split: '泣き別れ', 'rear-middle': '最後部の真ん中' };
+    function showSummary(final) {
+      sum.innerHTML = '';
+      sum.appendChild(el('span', '', (final ? '' : '流しています… ') + done + '/' + n + '件（' + ((Date.now() - t0) / 1000).toFixed(0) + '秒）'));
+      var b = el('b', badCases ? 'bad' : 'good', '違反のあった件: ' + badCases);
+      sum.appendChild(b);
+      Object.keys(counts).forEach(function (k) { sum.appendChild(el('span', '', (NAMES[k] || k) + ' ' + counts[k])); });
+    }
+    step(0);
+  });
+
+  /* ---------- 添乗員さんの入力 ---------- */
+  var fieldLoaded = false;
+  function loadField() {
+    if (fieldLoaded) return;
+    fieldLoaded = true;
+    var box = $('field');
+    fetch('test/fixtures/field-2026-10-23.json').then(function (r) { return r.json(); }).then(function (data) {
+      data.cases.forEach(function (c) {
+        var d = el('div', 'detail');
+        var out = run(c);
+        drawDetail(d, c, out);
+        d.insertBefore(el('p', 'note', c.note), d.children[1]);
+        box.appendChild(d);
+      });
+    }).catch(function () {
+      box.appendChild(el('p', 'note', 'テストデータを読み込めませんでした。手元で開くときは、リポジトリのフォルダで「python -m http.server」を動かし、http://localhost:8000/debug.html を開いてください。'));
+    });
+  }
+
+  /* ---------- かたちの一覧（docs/アルゴリズム.md の2章） ---------- */
+  // 各かたちは、列ごとに座る席（c=1〜4）を前から並べたもの
+  var SHAPES = [
+    [1, [['ok', '1席', [[1]]]]],
+    [2, [['ok', '横ペア', [[1, 2]]], ['ng', '縦（禁止）', [[2], [2]]], ['ng', '通路またぎ（禁止）', [[2, 3]]]]],
+    [3, [['ok', '横3（通路をまたぐ）', [[1, 2, 3]]], ['fb', '鍵席（L字）', [[1, 2], [2]]], ['ng', '縦一列（禁止）', [[2], [2], [2]]]]],
+    [4, [['ok', '横4', [[1, 2, 3, 4]]], ['fb', '2＋2（同じ側）', [[1, 2], [1, 2]]], ['ng', '縦一列（禁止）', [[4], [4], [4], [4]]]]],
+    [5, [['ok', '3＋2', [[1, 2, 3], [1, 2]]], ['fb', '4＋1【要確認】', [[1, 2, 3, 4], [1]]], ['ng', '3列（禁止）', [[1, 2], [1, 2], [1]]]]],
+    [6, [['ok', '4＋2', [[1, 2, 3, 4], [1, 2]]], ['fb', '3＋3【要確認】', [[1, 2, 3], [1, 2, 3]]], ['ng', '2＋2＋2（禁止）', [[1, 2], [1, 2], [1, 2]]]]],
+    [7, [['ok', '4＋3', [[1, 2, 3, 4], [1, 2, 3]]], ['ng', '4＋2＋1（禁止）', [[1, 2, 3, 4], [1, 2], [1]]]]],
+    [8, [['ok', '4＋4', [[1, 2, 3, 4], [1, 2, 3, 4]]]]]
+  ];
+  function shapeBus(rows) {
+    var bus = el('div', 'bus');
+    rows.forEach(function (cols, i) {
+      [1, 2, 'a', 3, 4].forEach(function (c) {
+        if (c === 'a') { bus.appendChild(el('div', 'rowno', '')); return; }
+        bus.appendChild(el('div', 'seat' + (cols.indexOf(c) >= 0 ? ' on' : '')));
+      });
+    });
+    return bus;
+  }
+  var grid = $('shapes');
+  grid.appendChild(el('div', 'h', '人数'));
+  ['1番', 'フォールバック', '使わない'].forEach(function (t) { grid.appendChild(el('div', 'h', t)); });
+  SHAPES.forEach(function (row) {
+    grid.appendChild(el('div', 'h', row[0] + '名'));
+    ['ok', 'fb', 'ng'].forEach(function (kind) {
+      var cell = el('div');
+      row[1].filter(function (s) { return s[0] === kind; }).forEach(function (s) {
+        var box = el('div', 'shape ' + kind);
+        box.appendChild(el('div', 'cap', s[1]));
+        box.appendChild(shapeBus(s[2]));
+        cell.appendChild(box);
+      });
+      grid.appendChild(cell);
+    });
+  });
+})();
+</script>
+</body>
+</html>

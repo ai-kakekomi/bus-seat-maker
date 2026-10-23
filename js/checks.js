@@ -56,7 +56,7 @@
     var out = [];
     var byGroup = seatsByGroup(layout, day);
     var nameOf = {};
-    groups.forEach(function (g) { nameOf[g.id] = (g.surname || '') + '（' + g.size + '名）'; });
+    groups.forEach(function (g) { nameOf[g.id] = (g.surname || 'お客様' + String.fromCharCode(65 + (g.order % 26))) + '（' + g.size + '名）'; });
 
     Object.keys(byGroup).forEach(function (gid) {
       var seats = byGroup[gid];
