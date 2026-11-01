@@ -63,6 +63,7 @@
   }
   .seat.is-empty .seat-mark { background: none !important; }
   .row-no { font-size: 5.6pt; }
+  .aisle-no { font-size: 7pt; color: #000; padding-bottom: .4mm; }
 
   .seat.g0 { background-color: #fff6cf !important; --stripe: #ffdf6e; }
   .seat.g1 { background-color: #e2effc !important; --stripe: #a9d2f7; }
