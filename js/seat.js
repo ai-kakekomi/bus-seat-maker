@@ -1973,10 +1973,18 @@
       }
     });
 
-    // 4. 人数ぶんの席があるか
+    // 4. 人数ぶんの席があるか（「席未定」の枠にいる人は、席未定として知らせる）
+    var waiting = {};
+    (day.unplaced || []).forEach(function (u) { waiting[u.groupId] = (waiting[u.groupId] || 0) + 1; });
     groups.forEach(function (g) {
       var seats = (day.seatsOfGroup && day.seatsOfGroup[g.id]) || [];
-      if (seats.length !== g.size) {
+      if (waiting[g.id]) {
+        issues.push({
+          type: 'unplaced', level: 'error', groupId: g.id,
+          message: nameOf(g) + '（' + g.size + '名）のうち' + waiting[g.id] + '名の席が決まっていません（席未定）。'
+        });
+      }
+      if (seats.length + (waiting[g.id] || 0) !== g.size) {
         issues.push({
           type: 'seat-count', level: 'error', groupId: g.id,
           message: nameOf(g) + '（' + g.size + '名）の席が' + seats.length + '席しかありません。'
@@ -2585,13 +2593,16 @@
    * 現場の手順そのままに、つぎの順で組み立てます。
    *
    *   ① 申し込み順（2日目は逆順）に、理想のかたちのまま前から落としていく
+   *      ・前席組 → 通常組 → 後方組 の区分ごとに、偶数の組 → 奇数の組 → 1人参加 の順（3段）
    *      ・その列に入らなければ、次の列へ送る（前の列は空いたまま）
    *      ・おひとり様・お2人は、前の列に残った端数を先に埋める
    *   ② 全員入れば、そこで終わり（点数も探索も使いません）
    *   ③ あふれたら、端数を打ち消し合う組どうしを入れ替える
    *   ④ それでも入らなければ、かたちを変える（3名→L字／5名→横一列4＋1）
+   *   ⑤ どのかたちでも入らない組は、無理に押し込まず「席未定」にする
    *
    * 最後部列は最終手段なので、①〜③では使いません。
+   * かたちは docs/アルゴリズム.md 2章の一覧にあるものだけを使います（縦並びは作らない）。
    * ======================================================= */
 
   /** 人数から「列ごとの人数」を出す。配列の先頭が前の列 */
@@ -2656,44 +2667,23 @@
   }
 
   /**
-   * その人数の「分け方」を、良い順に並べて出す。
-   * 先頭が本来のかたち、つぎが代わりのかたち（3名→L字／5名→横一列4＋1）、
-   * そのあとが、端数を打ち消すためのそれ以外の分け方（列数の少ない順）。
+   * その人数で使ってよい「分け方」を、良い順に並べて出す（docs/アルゴリズム.md 2章の一覧）。
+   * 先頭が本来のかたち、つぎが代わりのかたち（3名→L字／5名→横一列4＋1 など）。
+   * 一覧にないかたち（縦並びの [1,1] など）は、どんなに混んでいても使いません。
    */
+  var TETRIS_ALLOWED = {
+    1: [[1]],
+    2: [[2]],                                 // 横ペアだけ（縦・通路またぎは不可）
+    3: [[3], [2, 1], [1, 2]],                 // 横3 → 鍵席
+    4: [[4], [2, 2]],                         // 横4 → 同じ側の2＋2
+    5: [[3, 2], [2, 3], [4, 1], [1, 4], [5]], // [5] は最後部列（5席）にしか入らない
+    6: [[4, 2], [2, 4], [3, 3]],
+    7: [[4, 3], [3, 4]]
+  };
   function tetrisShapeVariants(size) {
-    var out = [tetrisParts(size, false)];
-    var alt = tetrisParts(size, true);
-    if (alt.join() !== out[0].join()) out.push(alt);
-
-    var comps = [];
-    (function build(rem, acc) {
-      if (comps.length > 400 || acc.length > 6) return;
-      if (rem === 0) { comps.push(acc.slice()); return; }
-      // 5席の分け方は、最後部列（5席横並び）でしか使えません
-      for (var k = Math.min(5, rem); k >= 1; k--) {
-        acc.push(k);
-        build(rem - k, acc);
-        acc.pop();
-      }
-    })(size, []);
-    // 最後部列を使うかたちは最終手段。あとは列数が少なく、前の列に多く座るかたちを先に
-    function big(p) { return p.some(function (k) { return k > ROW_SEATS; }) ? 1 : 0; }
-    comps.sort(function (a, b) {
-      if (big(a) !== big(b)) return big(a) - big(b);
-      if (a.length !== b.length) return a.length - b.length;
-      for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return b[i] - a[i];
-      return 0;
-    });
-
-    var seen = {};
-    var list = [];
-    out.concat(comps).forEach(function (p) {
-      var key = p.join(',');
-      if (seen[key]) return;
-      seen[key] = true;
-      list.push(p);
-    });
-    return list.slice(0, 80);
+    if (TETRIS_ALLOWED[size]) return TETRIS_ALLOWED[size];
+    // 8名以上は、4席の列を重ねてあまりを最後（または最初）の列に
+    return tetrisIdealVariants(size);
   }
 
   /**
@@ -2844,25 +2834,6 @@
     }
   }
 
-  /**
-   * 最後の手段。空いている席を前から拾って座っていただく。
-   * ここに来るのは席がほぼ埋まりきったときだけで、泣き別れの注意が出ます。
-   */
-  function tetrisScatter(layout, state, group) {
-    var need = group.size;
-    var picked = [];
-    for (var r = 1; r <= state.limitRow && picked.length < need; r++) {
-      var cols = r === layout.lastRow ? [1, 2, 3, 4, 5] : [1, 2, 3, 4];
-      for (var i = 0; i < cols.length && picked.length < need; i++) {
-        var key = r + ',' + cols[i];
-        if (state.free[key]) picked.push({ row: r, cols: [cols[i]] });
-      }
-    }
-    if (picked.length < need) return false;
-    tetrisCommit(layout, state, group, picked);
-    return true;
-  }
-
   /** 順番どおりに全部落とす（1回ぶん） */
   function tetrisRun(layout, groups, order, opt) {
     var day = {
@@ -2919,21 +2890,23 @@
       missed.push(g);
     });
 
-    var stillMissed = missed;
-
-    // 最後の手段。かたちを問わず、空いている席に座っていただく（泣き別れになります）
-    stillMissed = stillMissed.filter(function (g) {
-      return !tetrisScatter(layout, state, g);
-    });
-
-    stillMissed.forEach(function (g) {
+    // 置けなかった組は、縦並びや泣き別れで押し込まず、バスの外の「席未定」の枠に置く
+    // （性別は、席が決まったあとの仕上げ tetrisFinish() で入れます）
+    day.unplaced = [];
+    var total = groups.reduce(function (s, g) { return s + g.size; }, 0);
+    var why = total > layout.usableSeatCount
+      ? '席が足りないため'
+      : '縦に並べたり離ればなれにしたりせずに座れる席が見つからなかったため';
+    missed.forEach(function (g) {
+      for (var m = 0; m < g.size; m++) day.unplaced.push({ groupId: g.id, gender: 'unknown' });
       day.warnings.push({
         type: 'no-seat', level: 'error', groupId: g.id,
-        message: 'お客様' + alpha(g.order + 1) + '（' + g.size + '名）の席が足りませんでした。'
+        message: 'お客様' + alpha(g.order + 1) + '（' + g.size + '名）は、' + why +
+          '、席未定にしています。座席表の外の「席未定」から、手で席に入れてください。'
       });
     });
 
-    day.missedCount = stillMissed.length;
+    day.missedCount = missed.length;
     day.groupOrder = order.map(function (g) { return g.id; });
     return refreshDay(layout, day);
   }
@@ -2996,7 +2969,29 @@
       rear * 3 + drift * TETRIS_ORDER_DRIFT;
   }
 
-  /** 並べる順番を作る。前席組 → 通常組 → 後方ご希望の組。2日目以降は逆順 */
+  /**
+   * 置く順番の3段（docs/アルゴリズム.md 4.2）。
+   *   段1: 偶数の組 → 段2: 奇数の組（3・5・7名…） → 段3: 1人参加
+   * 偶数の組は2人掛けをまるごと使うので、先に置けば、すき間は「2人掛けの片方」か
+   * 「通路またぎ」の形でしか残らず、そこを奇数の組と1人参加が埋めます。
+   */
+  function tetrisStage(g) {
+    if (g.size === 1) return 3;
+    return g.size % 2 === 0 ? 1 : 2;
+  }
+
+  /** 段の順に並べ替える。同じ段の中は元の順番のまま */
+  function tetrisStaged(list) {
+    return list.map(function (g, i) { return { g: g, i: i }; })
+      .sort(function (a, b) { return tetrisStage(a.g) - tetrisStage(b.g) || a.i - b.i; })
+      .map(function (x) { return x.g; });
+  }
+
+  /**
+   * 並べる順番を作る。前席組 → 通常組 → 後方ご希望の組。2日目以降は逆順。
+   * 3段（偶数 → 奇数 → 1人参加）は、それぞれの区分の中で分けます（4.2）。
+   * 前席組は有料なので先に前3列を確保し、後方組はほかの組を置いたあとに置くためです。
+   */
   function tetrisOrder(groups, opt) {
     var front = groups.filter(function (g) { return g.frontOption; });
     var rear = groups.filter(function (g) { return g.rearOption; });
@@ -3007,7 +3002,7 @@
       front = front.slice().reverse();
       rest = rest.slice().reverse();
     }
-    return front.concat(rest).concat(rear);
+    return tetrisStaged(front).concat(tetrisStaged(rest)).concat(tetrisStaged(rear));
   }
 
   /**
@@ -3115,12 +3110,17 @@
     // ② 最後部列は最終手段。あぶれた人がいるときだけ解放する
     var limitRow = layout.lastRow - 1;
     if (bestTrouble > 0) {
+      var stillMissed = best.missedCount > 0;
       var withRear = run(order, alt, layout.lastRow, tight);
       var rearScore = score(withRear);
-      if (rearScore < bestScore) {
+      // 点数が悪くならなければ、最後部列を使ったほうを採ります
+      if (rearScore <= bestScore) {
         best = withRear; bestScore = rearScore; bestTrouble = trouble(best);
         limitRow = layout.lastRow;
       }
+      // 席未定の人がいるなら、③以降は最後部列も使って探します。
+      // ここで閉じたままにすると、最後部の5席が空いたまま席未定が出てしまいます
+      if (stillMissed) limitRow = layout.lastRow;
     }
 
     // ③ 端数を打ち消すために、組の順番を入れ替える。
@@ -3239,6 +3239,16 @@
       });
     });
 
+    // 席未定の人にも、グループの人の性別をそのまま入れる（席未定の組は、組ごと丸ごと外にいる）
+    var nextMember = {};
+    (best.unplaced || []).forEach(function (u) {
+      var g = null;
+      groups.forEach(function (x) { if (x.id === u.groupId) g = x; });
+      var k = nextMember[u.groupId] || 0;
+      nextMember[u.groupId] = k + 1;
+      u.gender = (g && g.members[k] && g.members[k].gender) || 'unknown';
+    });
+
     // 席が決まったので、グループの中で誰がどこに座るかを整える
     resolveGenders(layout, groups, best);
     relaxGenderConflicts(layout, groups, best);
@@ -3260,27 +3270,51 @@
    * テトリス方式で1日ぶんを組む（席替えの見直しつき）。
    *
    * 並べ方そのものは逐次で決まりますが、「どの組から並べ始めるか」は日ごとの席替えの話です。
-   * 前の日につづけて後方になってしまう組がいたら、並べ始める位置だけをずらして見直します。
+   * 前の日につづけて後方になってしまう組や、前の日までに相席をお願いした組にまた相席を
+   * お願いすることになったら、並べ始める位置だけをずらして見直します（相席の当番は日ごとに回す、S4）。
+   * 後方の連続を減らすほうを先にし、相席の当番はその次に見ます。
    */
   function tetrisDay(layout, groups, opt) {
     var day = tetrisAssignDay(layout, groups, opt);
     if (!opt.previousRows || !opt.rotatingCount) return day;
 
     var stay = rearStayCount(layout, groups, day, opt.previousRows);
-    if (!stay) return day;
+    // 相席の当番を代われる組（まだ相席になっていない奇数の組・1人参加）がいないなら、
+    // 並べ始める位置をずらしても当番は回らないので、見直さない（ぎゅうぎゅうでは全員が相席になる）
+    var again = canRotateShare(groups, day, opt.shareHistory) ? shareAgainCount(day, opt.shareHistory) : 0;
+    if (!stay && !again) return day;
 
     var baseTrouble = tetrisTrouble(layout, groups, day);
-    for (var k = 1; k <= 5 && stay > 0 && k < opt.rotatingCount; k++) {
+    for (var k = 1; k <= 5 && (stay > 0 || again > 0) && k < opt.rotatingCount; k++) {
       var shift = (opt.startIndex + k) % opt.rotatingCount;
       var alt = tetrisAssignDay(layout, groups, merge2(opt, { startIndex: shift }));
       var altStay = rearStayCount(layout, groups, alt, opt.previousRows);
+      var altAgain = shareAgainCount(alt, opt.shareHistory);
       var altTrouble = tetrisTrouble(layout, groups, alt);
       // 席の出来ばえを落とさない範囲でだけ、席替えのために乗り換えます
-      if (altStay < stay && altTrouble <= baseTrouble) {
-        day = alt; stay = altStay; baseTrouble = altTrouble;
+      var lessStay = altStay < stay;
+      var lessAgain = altStay === stay && altAgain < again;
+      if ((lessStay || lessAgain) && altTrouble <= baseTrouble) {
+        day = alt; stay = altStay; again = altAgain; baseTrouble = altTrouble;
       }
     }
     return day;
+  }
+
+  /** 相席の当番を代われる組（これまで相席になっておらず、今日も相席でない奇数の組・1人参加）がいるか */
+  function canRotateShare(groups, day, history) {
+    if (!history) return false;
+    var today = {};
+    sharedGroupIds(day).forEach(function (id) { today[id] = true; });
+    return groups.some(function (g) {
+      return g.size % 2 === 1 && !g.frontOption && !(history[g.id] > 0) && !today[g.id];
+    });
+  }
+
+  /** 前の日までに相席になったことのある組が、その日また相席になっている数（S4） */
+  function shareAgainCount(day, history) {
+    if (!history) return 0;
+    return sharedGroupIds(day).filter(function (id) { return (history[id] || 0) > 0; }).length;
   }
 
   function assign(input) {
@@ -3316,7 +3350,9 @@
         sharing: sharing,
         idealFeasible: feasible,
         rotatingCount: rotating.length,
-        previousRows: d > 0 ? dayRowMap(groups, days[d - 1]) : null
+        previousRows: d > 0 ? dayRowMap(groups, days[d - 1]) : null,
+        // 相席の当番を日ごとに回すため、これまでに相席になった日数を渡す（S4）
+        shareHistory: d > 0 ? shareHistory : null
       }) : buildBestDay(layout, groups, {
         frontStartIndex: startIndexForDay(frontRotating, d, dayCount),
         reversed: d % 2 === 1,
@@ -3327,6 +3363,7 @@
         previousSeatMaps: days.map(daySeatMap)
       }, startIndexForDay(rotating, pairIndex, dayCount), rotating.length);
       day.dayIndex = d;
+      day.unplaced = day.unplaced || []; // 席未定の枠（旧エンジンは使わない）
       // 前の日の並びを控えておく（手で直したあとの見直しでも使います）
       day.previousRows = d > 0 ? dayRowMap(groups, days[d - 1]) : null;
       var rearNote = rearStayNotice(layout, groups, day);
@@ -3392,6 +3429,31 @@
     return { ok: true, reason: 'swapped', seatIds: [seatIdA, seatIdB] };
   }
 
+  /**
+   * 手動調整：「席未定」の枠の人を、バスの席に入れる。
+   * 空席なら、そのまま座る。お客様のいる席なら入れ替えて、その人が「席未定」の枠に出る。
+   * @param {number} index 席未定の枠の何人目か（0起点）
+   */
+  function placeUnplaced(layout, day, index, seatId) {
+    var list = day.unplaced || (day.unplaced = []);
+    var person = list[index];
+    if (!person) return { ok: false, reason: 'unplaced-not-found', index: index };
+    var seat = seatById(layout, seatId);
+    if (!seat) return { ok: false, reason: 'seat-not-found', seatId: seatId };
+    if (seat.isCrew) return { ok: false, reason: 'crew-seat', seatId: seatId };
+
+    var p = day.placements;
+    var out = p[seatId];
+    p[seatId] = person;
+    // 人が座った席は「取り置きの空席」ではなくなる
+    if (day.reserved) delete day.reserved[seatId];
+    if (day.blocked) delete day.blocked[seatId];
+    if (out) list[index] = out; else list.splice(index, 1);
+
+    refreshDay(layout, day);
+    return { ok: true, reason: out ? 'swapped-out' : 'placed', seatId: seatId };
+  }
+
   return {
     LAYOUTS: LAYOUTS,
     FRONT_ROWS: FRONT_ROWS,
@@ -3427,6 +3489,7 @@
     inspectDay: inspectDay,
     issueKey: issueKey,
     swapSeats: swapSeats,
+    placeUnplaced: placeUnplaced,
     maru: maru
   };
 });
