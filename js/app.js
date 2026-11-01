@@ -377,7 +377,7 @@
 
       sheet.appendChild(el('div', 'front-mark', '前（運転席・乗降口）'));
       sheet.appendChild(busTable(day, di, labels));
-      sheet.appendChild(el('p', 'rear-mark', '後ろ'));
+      sheet.appendChild(el('p', 'rear-mark', '後ろ（最後部は' + result.layout.lastRow + '列目）'));
 
       var legend = el('div', 'legend');
       var hasFront = false;
@@ -497,6 +497,14 @@
       cell.style.gridColumn = String(S.trackOf(layout, seat.row, seat.col));
       wrap.appendChild(cell);
     });
+
+    // 通路に「1列目」「2列目」…（阪急の座席表・封筒と同じ並び）。最後部列は通路がないので「後ろ」の表示に出す
+    for (var r = 1; r < layout.lastRow; r++) {
+      var no = el('div', 'aisle-no', r + '列目');
+      no.style.gridRow = String(r);
+      no.style.gridColumn = '3';
+      wrap.appendChild(no);
+    }
 
     // グループを囲む枠（形の外周をなぞる）
     var labelDone = {};

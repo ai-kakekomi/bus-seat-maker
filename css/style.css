@@ -235,6 +235,14 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
   justify-content: center;
   align-content: start;
 }
+/* 通路の列番号。グループのラベルは少し上に寄っているので、番号は通路の下に置いて重ならないようにする。
+   通路をまたぐ枠の線（上下の辺）より手前に出す */
+.aisle-no {
+  position: relative; z-index: 5; pointer-events: none;
+  display: flex; align-items: flex-end; justify-content: center;
+  padding-bottom: .15rem;
+  font-size: .64rem; font-weight: 700; color: #5f6b72; white-space: nowrap;
+}
 .row-no {
   position: absolute; left: .18rem; top: .05rem; font-size: .62rem; color: #8a969e;
 }
