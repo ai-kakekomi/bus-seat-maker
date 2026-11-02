@@ -378,6 +378,8 @@
       sheet.appendChild(el('div', 'front-mark', '前（運転席・乗降口）'));
       sheet.appendChild(busTable(day, di, labels));
       sheet.appendChild(el('p', 'rear-mark', '後ろ'));
+      // 席が決まらなかった人は、バスの外の「席未定」の枠に出す（印刷にも出します）
+      if ((day.unplaced || []).length) sheet.appendChild(unplacedBox(day, di, labels));
 
       var legend = el('div', 'legend');
       var hasFront = false;
@@ -430,10 +432,11 @@
       });
     } else {
       var issues = S.inspectDay(result.layout, result.groups, day);
-      issues.filter(function (i) { return !i.preexisting; }).forEach(function (i) {
+      // 席未定の人が残っているあいだは、はじめからあった注意でも警告として出し続ける
+      issues.filter(function (i) { return !i.preexisting || i.type === 'unplaced'; }).forEach(function (i) {
         items.push({ text: i.message, level: i.level === 'error' ? 'error' : 'warn' });
       });
-      issues.filter(function (i) { return i.preexisting; }).forEach(function (i) {
+      issues.filter(function (i) { return i.preexisting && i.type !== 'unplaced'; }).forEach(function (i) {
         items.push({ text: '（はじめの割り当てのときから）' + i.message, level: 'old' });
       });
     }
@@ -576,6 +579,30 @@
     return wrap;
   }
 
+  /**
+   * バスの外の「席未定」の枠。席が決まらなかった人を1人1マスで並べます。
+   * マスを押して、次にバスの席を押すと、その席に入ります（お客様のいる席なら入れ替わり）。
+   */
+  function unplacedBox(day, dayIndex, labels) {
+    var box = el('div', 'unplaced');
+    box.appendChild(el('p', 'unplaced-title',
+      '席未定（バスの外）… ' + day.unplaced.length + '名。席を決めて、手で入れてください'));
+    var list = el('div', 'unplaced-list');
+    day.unplaced.forEach(function (u, idx) {
+      var cell = el('div', 'seat unplaced-seat g' + result.colors[u.groupId] + frontClass(u.groupId));
+      var l = labels[u.groupId];
+      cell.appendChild(el('span', 'seat-label', l ? l.label : ''));
+      cell.appendChild(el('span', 'seat-mark', u.gender === 'male' ? '男' : (u.gender === 'female' ? '女' : '')));
+      if (selectedSeat && selectedSeat.dayIndex === dayIndex && selectedSeat.unplaced === idx) {
+        cell.className += ' is-selected';
+      }
+      cell.addEventListener('click', function () { onUnplacedClick(dayIndex, idx); });
+      list.appendChild(cell);
+    });
+    box.appendChild(list);
+    return box;
+  }
+
   /** 前席オプションのグループなら、席を斜めストライプにするための印 */
   function frontClass(groupId) {
     var g = null;
@@ -616,7 +643,8 @@
       cell.appendChild(el('span', 'seat-warn', '男女'));
     }
 
-    if (selectedSeat && selectedSeat.dayIndex === dayIndex && selectedSeat.seatId === seat.id) {
+    if (selectedSeat && selectedSeat.dayIndex === dayIndex && selectedSeat.seatId === seat.id &&
+        selectedSeat.unplaced == null) {
       cell.className += ' is-selected';
     }
 
@@ -631,7 +659,10 @@
    * 同じ席をもう一度タップすると選び直せます。
    */
   function onSeatClick(dayIndex, seatId) {
-    if (!selectedSeat || selectedSeat.dayIndex !== dayIndex) {
+    if (selectedSeat && selectedSeat.dayIndex === dayIndex && selectedSeat.unplaced != null) {
+      // 席未定の人を選んでから、バスの席を押した
+      placeUnplaced(dayIndex, selectedSeat.unplaced, seatId);
+    } else if (!selectedSeat || selectedSeat.dayIndex !== dayIndex) {
       selectedSeat = { dayIndex: dayIndex, seatId: seatId };
     } else if (selectedSeat.seatId === seatId) {
       selectedSeat = null;
@@ -648,6 +679,35 @@
     renderSheets();
   }
 
+  /**
+   * 席未定の枠のマスを押したとき。
+   * 先にバスの席を選んでいれば、その席に入れます。そうでなければ、このマスを選びます。
+   */
+  function onUnplacedClick(dayIndex, idx) {
+    if (selectedSeat && selectedSeat.dayIndex === dayIndex && selectedSeat.unplaced == null) {
+      placeUnplaced(dayIndex, idx, selectedSeat.seatId);
+    } else if (selectedSeat && selectedSeat.dayIndex === dayIndex && selectedSeat.unplaced === idx) {
+      selectedSeat = null;
+    } else {
+      selectedSeat = { dayIndex: dayIndex, unplaced: idx };
+    }
+    renderSheets();
+  }
+
+  /** 席未定の人を、バスの席に入れる（お客様のいる席なら、その人が席未定に出る） */
+  function placeUnplaced(dayIndex, idx, seatId) {
+    var res = S.placeUnplaced(result.layout, result.days[dayIndex], idx, seatId);
+    if (res.ok) {
+      manualEdited[dayIndex] = true;
+      selectedSeat = null;
+      flash(res.reason === 'swapped-out'
+        ? '席未定の人を席に入れ、その席にいた人を席未定に出しました。'
+        : '席未定の人を席に入れました。');
+    } else {
+      flash(失敗の理由(res));
+    }
+  }
+
   /** seat.js が返す失敗理由コードを、日本語の文にする */
   function 失敗の理由(res) {
     switch (res.reason) {
@@ -656,6 +716,7 @@
       case 'same-seat':
         return '同じ席が選ばれています。別の席を選んでください。';
       case 'seat-not-found':
+      case 'unplaced-not-found':
         return '対象が見つかりませんでした。もう一度選び直してください。';
       default:
         return '入れ替えできませんでした。';

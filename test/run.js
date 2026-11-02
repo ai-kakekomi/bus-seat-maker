@@ -241,7 +241,11 @@ test('席にゆとりがあるときは、男女の並びはまったく起き�
   eq(r.warnings.filter(function (w) { return w.type === 'mixed-gender'; }).length, 0, '男女相席の警告');
 });
 
-test('席の数に収まる人数なら、誰も席にあぶれない', function () {
+test('席の数に収まる人数なら、縦並び・泣き別れをせず、座れない組は席未定にして警告を出す', function () {
+  // #2・#4 で書き直し（以前は「誰も席にあぶれない」）。
+  // 3名×14組などは、右の窓側に縦の1席ずつのすき間が残って席未定が出ることがある。
+  // 3名どうしを横3と鍵席でかみ合わせる（設計書 3.1、#3 の担当）が入ったら、全員座ることを確かめ直す
+  var CK = require(path.join(__dirname, '..', 'js', 'checks.js'));
   var patterns = [
     [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3],          // 42名
     [5, 5, 5, 5, 5, 5, 5, 5],                              // 40名
@@ -255,11 +259,17 @@ test('席の数に収まる人数なら、誰も席にあぶれない', function
     var r = S.assign({ layoutType: '11x45', groups: groups, days: 3 });
     ok(total <= r.layout.usableSeatCount, 'パターン' + pi + ' が定員超過（テスト条件が不適切）');
     r.days.forEach(function (day, di) {
-      eq(Object.keys(day.placements).length, total,
-        'パターン' + pi + ' の' + (di + 1) + '日目で席にあぶれた人がいる');
+      var where = 'パターン' + pi + ' の' + (di + 1) + '日目';
+      eq(Object.keys(day.placements).length + day.unplaced.length, total, where + 'で人数が合わない');
+      var bad = CK.inspect(r.layout, r.groups, day).filter(function (v) {
+        return v.type === 'vertical' || v.type === 'split' || v.type === 'pair-shape';
+      });
+      eq(bad.map(function (v) { return v.message; }).join(' / '), '', where);
+      var missedGroups = {};
+      day.unplaced.forEach(function (u) { missedGroups[u.groupId] = true; });
+      eq(day.warnings.filter(function (w) { return w.type === 'no-seat'; }).length,
+        Object.keys(missedGroups).length, where + 'の席未定の警告');
     });
-    eq(r.warnings.filter(function (w) { return w.type === 'no-seat'; }).length, 0,
-      'パターン' + pi + ' で席不足の警告');
   });
 });
 
@@ -394,9 +404,11 @@ test('ほぼ満席の見本は、全組が本来のかたちに収まる（テ�
   });
 });
 
-test('5名×8組＋3名の43名満席でも、離れ離れになる組は出さない', function () {
+test('5名×8組＋3名の43名満席でも、離れ離れになる組は出さない（座れない組は席未定）', function () {
   // 5名の組は端数が1と2の両方できるので、いちばん敷き詰めにくい構成。
-  // 本来のかたちのままでは埋まらないので、かたちを変えて端数を打ち消します
+  // 本来のかたちのままでは埋まらないので、かたちを変えて端数を打ち消します。
+  // #2・#4 で書き直し（以前は「全員座る」）。縦の1席ずつのすき間が残ると3名の組が席未定になる。
+  // 5名・7名のかみ合わせ（設計書 3.1 の【要決定】、#3）が決まったら、全員座ることを確かめ直す
   var groups = [];
   for (var i = 0; i < 8; i++) groups.push(group('f' + i, 5));
   groups.push(group('t', 3));
@@ -404,7 +416,7 @@ test('5名×8組＋3名の43名満席でも、離れ離れになる組は出さ�
     var r = S.assign({ layoutType: '11x45', groups: groups, days: days });
     eq(r.totalPeople, 43, '人数');
     r.days.forEach(function (day, di) {
-      eq(Object.keys(day.placements).length, 43, (di + 1) + '日目に座れない人がいる');
+      eq(Object.keys(day.placements).length + day.unplaced.length, 43, (di + 1) + '日目の人数が合わない');
       eq(splitGroupCount(day), 0, (di + 1) + '日目に分かれた組がある');
     });
   });
@@ -1117,17 +1129,21 @@ test('ほぼ満席の見本では、もう泣き別れが起きない', function
   });
 });
 
-test('分かれてしまったときは、人数と理由が分かる警告が出る', function () {
-  // 定員ぎりぎりまで大人数グループを詰めて、どうしても分かれる状況をつくる。
+test('どうしても置けない組は、分けずに席未定にして、理由の分かる警告を出す（#2）', function () {
+  // 定員ぎりぎりまで大人数グループを詰めて、一覧のかたちでは置けない状況をつくる。
   // 12名は3列ぶん、7名は2列ぶん。43席にきれいには入りません
   var groups = [group('g1', 12), group('g2', 12), group('g3', 12), group('g4', 7)];
   var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
-  var w = r.warnings.filter(function (x) { return x.type === 'split'; });
-  ok(w.length >= 1, '分割の警告が出ていない（テスト条件が不適切）');
-  ok(/【要確認】お客様[A-Z]+（\d+名）が離れた席に分かれてしまいました/.test(w[0].message),
-    '理由が書かれていない: ' + w[0].message);
-  ok(w[0].message.indexOf('ひとつづきに座れる場所がありません') >= 0, '原因が書かれていない');
+  var day = r.days[0];
+  eq(splitGroupCount(day), 0, '泣き別れで押し込んでいる');
+  ok(day.unplaced.length > 0, '席未定が出ていない（テスト条件が不適切）');
+  var w = r.warnings.filter(function (x) { return x.type === 'no-seat'; });
+  ok(w.length >= 1, '席未定の警告が出ていない');
+  ok(/お客様[A-Z]+（\d+名）は、/.test(w[0].message), '対象と人数が書かれていない: ' + w[0].message);
+  ok(w[0].message.indexOf('席未定') >= 0, '席未定と書かれていない: ' + w[0].message);
   eq(w[0].level, 'error', '重み');
+  // 席に座っている人と席未定の人を足すと、全員になる
+  eq(Object.keys(day.placements).length + day.unplaced.length, 43, '人数が合わない');
 });
 
 test('「分かれました」の警告は、結果としてつながっていた場合には出さない', function () {
@@ -1272,7 +1288,9 @@ test('4日ツアーは「ずらす」と「前後反転」を組み合わせる'
 test('人数がばらばらでもグループは切らずに前後反転する', function () {
   var groups = [group('a', 5), group('b', 1), group('c', 4), group('d', 2), group('e', 3), group('f', 1)];
   var r = S.assign({ layoutType: '11x45', groups: groups, days: 2 });
-  eq(r.days[1].groupOrder.join(','), 'f,e,d,c,b,a', '2日目の順序');
+  // 申し込み順を逆にした f,e,d,c,b,a を、3段（偶数 → 奇数 → 1人参加）に並べ替える（#4、設計書 4.2）
+  //   偶数: d(2), c(4) ／ 奇数: e(3), a(5) ／ 1人参加: f, b
+  eq(r.days[1].groupOrder.join(','), 'd,c,e,a,f,b', '2日目の順序');
   // グループが分断されていないこと
   r.days.forEach(function (day, di) {
     groups.forEach(function (g) {
@@ -1586,6 +1604,10 @@ test('うしろ半分が2日つづくお客様は、できるだけ減らす（�
   // ただし、ゼロにはできません。42名／43席で前席オプションが4組いると、
   // 残る10組のうち5組ほどは毎日うしろ半分に入るしかないためです。
   // 重み（TETRIS_REAR_HALF）を入れる前は4組が連続していました。
+  //
+  // #4（置く順番の3段）で並べる順番が変わり、4組が連続するようになったので、上限を4組にゆるめた。
+  // 【#8 への申し送り】日ごとの席替えそのものを #8（区画を回す・左右を入れ替える）で作り直すときに、
+  // 上限を見直す（もとは2組）
   var r = S.assign({ layoutType: '11x45', groups: fullHouseGroups(), days: 3 });
   var half = Math.ceil(r.layout.lastRow / 2) + 1;
   function rearIds(day) {
@@ -1601,7 +1623,7 @@ test('うしろ半分が2日つづくお客様は、できるだけ減らす（�
     var prev = rearIds(r.days[di - 1]);
     var now = rearIds(r.days[di]);
     var both = Object.keys(now).filter(function (id) { return prev[id]; });
-    ok(both.length <= 2,
+    ok(both.length <= 4,
       (di + 1) + '日目にうしろ半分が続いた組が多すぎる: ' + both.join(','));
   }
 });
@@ -2096,6 +2118,277 @@ test('空席との入れ替えもできる', function () {
   S.swapSeats(r.layout, day, a, empty);
   ok(!day.placements[a], '元の席が空いていない');
   eq(day.placements[empty].groupId, 'g1');
+});
+
+console.log('\n--- 8. 縦並びを作らない・席未定の枠（#2） ---');
+
+var C = require(path.join(__dirname, '..', 'js', 'checks.js'));
+var G = require(path.join(__dirname, '..', 'js', 'gen.js'));
+
+test('ぎゅうぎゅうの構成でも、縦並び・泣き別れ・横ペアでない2名を作らない', function () {
+  // 添乗員さんの実運用で縦並びが出た、空席0〜2席の構成をランダムに流す
+  for (var seed = 1; seed <= 24; seed++) {
+    var layoutType = seed % 3 === 0 ? '12x49' : '11x45';
+    var c = G.makeCase({
+      seed: seed, profile: seed % 2 ? '意地悪' : 'ふだん', spare: seed % 3, days: 1 + (seed % 2),
+      layoutType: layoutType, usable: S.buildLayout(layoutType).usableSeatCount
+    });
+    var r = S.assign({ layoutType: c.layoutType, groups: c.groups, days: c.days });
+    r.days.forEach(function (day, di) {
+      var bad = C.inspect(r.layout, r.groups, day).filter(function (v) {
+        return v.type === 'vertical' || v.type === 'split' || v.type === 'pair-shape';
+      });
+      eq(bad.map(function (v) { return v.message; }).join(' / '), '', c.id + ' の' + (di + 1) + '日目');
+    });
+  }
+});
+
+test('添乗員さんの入力（10/23）で、縦並びが出ない', function () {
+  var data = require('./fixtures/field-2026-10-23.json');
+  data.cases.forEach(function (c) {
+    var r = S.assign({ layoutType: c.layoutType, groups: c.groups, days: c.days });
+    r.days.forEach(function (day, di) {
+      var bad = C.inspect(r.layout, r.groups, day).filter(function (v) {
+        return v.type === 'vertical' || v.type === 'split' || v.type === 'pair-shape';
+      });
+      eq(bad.map(function (v) { return v.message; }).join(' / '), '', c.id + ' の' + (di + 1) + '日目');
+    });
+  });
+});
+
+test('席未定の人を、空席に入れられる', function () {
+  // 44名（2名×22組）／43席。1組は席未定になる
+  var groups = [];
+  for (var i = 0; i < 22; i++) groups.push(group('p' + i, 2, { genders: ['male', 'female'] }));
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  var day = r.days[0];
+  eq(day.unplaced.length, 2, '席未定の人数');
+  ok(day.unplaced.every(function (u) { return u.gender !== 'unknown'; }), '席未定の人に性別が入っていない');
+  var empty = r.layout.seats.filter(function (s) { return !s.isCrew && !day.placements[s.id]; })[0].id;
+  var who = day.unplaced[0].groupId;
+  var res = S.placeUnplaced(r.layout, day, 0, empty);
+  eq(res.reason, 'placed', '結果');
+  eq(day.placements[empty].groupId, who, '空席に入っていない');
+  eq(day.unplaced.length, 1, '席未定から減っていない');
+  ok(day.seatsOfGroup[who].indexOf(empty) >= 0, '席の一覧が更新されていない');
+});
+
+test('席未定の人を、お客様のいる席に入れると、その人が席未定に出る', function () {
+  var groups = [];
+  for (var i = 0; i < 22; i++) groups.push(group('p' + i, 2));
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  var day = r.days[0];
+  var seat = Object.keys(day.placements)[0];
+  var before = day.placements[seat];
+  var who = day.unplaced[0];
+  var res = S.placeUnplaced(r.layout, day, 0, seat);
+  eq(res.reason, 'swapped-out', '結果');
+  ok(day.placements[seat] === who, '席に入っていない');
+  ok(day.unplaced[0] === before, '元の人が席未定に出ていない');
+  eq(day.unplaced.length, 2, '席未定の人数が変わった');
+});
+
+test('席未定の人は、業務席には入れられない', function () {
+  var groups = [];
+  for (var i = 0; i < 22; i++) groups.push(group('p' + i, 2));
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  var day = r.days[0];
+  var crew = r.layout.seats.filter(function (s) { return s.isCrew; })[0].id;
+  var res = S.placeUnplaced(r.layout, day, 0, crew);
+  eq(res.ok, false, '業務席に入ってしまった');
+  eq(res.reason, 'crew-seat', '理由');
+  eq(day.unplaced.length, 2, '席未定の人数が変わった');
+});
+
+test('席未定の人が残っているあいだは、手で直したあとの見直しでも知らせる', function () {
+  var groups = [];
+  for (var i = 0; i < 22; i++) groups.push(group('p' + i, 2));
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  var day = r.days[0];
+  var issues = S.inspectDay(r.layout, r.groups, day);
+  var u = issues.filter(function (x) { return x.type === 'unplaced'; });
+  eq(u.length, 1, '席未定の注意');
+  eq(u[0].level, 'error', '重み');
+  eq(issues.filter(function (x) { return x.type === 'seat-count'; }).length, 0, '席未定なのに「席が足りない」とも出ている');
+});
+
+test('最後部の列が空いたまま席未定にしない（添乗員さんの入力 1023-a）', function () {
+  // 最後部の列を開く条件（tetrisSolve() の②）。以前は出来ばえが同じだと最後部の列を開かず、
+  // 3日目に、最後部の5席が空いたまま5名が席未定になっていた
+  var data = require('./fixtures/field-2026-10-23.json');
+  var c = data.cases.filter(function (x) { return x.id === 'field-1023-a'; })[0];
+  var r = S.assign({ layoutType: c.layoutType, groups: c.groups, days: c.days });
+  r.days.forEach(function (day, di) {
+    eq(day.unplaced.length, 0, (di + 1) + '日目の席未定');
+  });
+});
+
+test('checks.js：最後部の列とその前の列は、画面の縦すじで前後につながる', function () {
+  // 10-4（右の窓側）と 11-5（最後部の右端）は前後のとなり。席番号は1つずれる
+  var layout = S.buildLayout('11x45');
+  var groups = [{ id: 'a', size: 3, order: 0 }];
+  var day = { placements: {
+    'r10-3': { groupId: 'a' }, 'r10-4': { groupId: 'a' }, 'r11-5': { groupId: 'a' }
+  }, unplaced: [] };
+  eq(C.inspect(layout, groups, day).filter(function (v) { return v.type === 'split'; }).length, 0, '泣き別れと判定された');
+});
+
+console.log('\n--- 9. 偶数の組を割らない・置く順番の3段（#4） ---');
+
+function orderSizes(r, day) {
+  var size = {};
+  r.groups.forEach(function (g) { size[g.id] = g.size; });
+  return day.groupOrder.map(function (id) { return id + ':' + size[id]; }).join(',');
+}
+
+test('オプションの組がいなければ、全体が 偶数の組 → 奇数の組 → 1人参加 の順になる', function () {
+  // 席に余裕があり、並べ直しの見直しが起きない構成
+  var groups = [group('g0', 3), group('g1', 2), group('g2', 1), group('g3', 4), group('g4', 5), group('g5', 2)];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  eq(orderSizes(r, r.days[0]), 'g1:2,g3:4,g5:2,g0:3,g4:5,g2:1', '置く順番（同じ段の中は申し込み順のまま）');
+});
+
+test('前席オプション組も、その中で 偶数 → 奇数 → 1人参加 の順。前3列に入る', function () {
+  var groups = [
+    group('f3', 3, { frontOption: true }), group('f2', 2, { frontOption: true }),
+    group('n3', 3), group('n2', 2), group('n4', 4)
+  ];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  var day = r.days[0];
+  eq(orderSizes(r, day), 'f2:2,f3:3,n2:2,n4:4,n3:3', '置く順番（前席組 → ふつうの組、それぞれの中で3段）');
+  ['f3', 'f2'].forEach(function (id) {
+    day.seatsOfGroup[id].forEach(function (sid) { ok(seatRow(sid) <= 3, id + ' が前3列の外: ' + sid); });
+  });
+});
+
+test('後方オプション組は、偶数でも奇数でも、ふつうの組のあとに置く', function () {
+  var groups = [
+    group('r2', 2, { rearOption: true }), group('n3', 3), group('r3', 3, { rearOption: true }), group('n2', 2)
+  ];
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 1 });
+  eq(orderSizes(r, r.days[0]), 'n2:2,n3:3,r2:2,r3:3', '置く順番（ふつうの組 → 後方組、それぞれの中で3段）');
+});
+
+test('偶数の組は、奇数の組が残した1席ずつのすき間のせいで席未定にならない（大量テスト #111）', function () {
+  // 申し込み順に置くと、3名の組が残した 3-4 と 8-4 の1席ずつしか残らず、2名の組が席未定になっていた例
+  var c = G.makeCase({ seed: 111, profile: 'ふだん', spare: 0, days: 3, layoutType: '11x45', usable: 43 });
+  var r = S.assign({ layoutType: c.layoutType, groups: c.groups, days: c.days });
+  var size = {};
+  r.groups.forEach(function (g) { size[g.id] = g.size; });
+  r.days.forEach(function (day, di) {
+    var even = day.unplaced.filter(function (u) { return size[u.groupId] % 2 === 0; });
+    eq(even.length, 0, (di + 1) + '日目に席未定の偶数の組の人');
+  });
+});
+
+test('checks.js の even-shared：偶数の組が2人掛けの片方を別の組と分けると違反になる', function () {
+  var layout = S.buildLayout('11x45');
+  var groups = [{ id: 's6', size: 6, order: 0 }, { id: 'o1', size: 1, order: 1 }, { id: 'p2', size: 2, order: 2 }];
+  // 6名の組が3＋3（3-1〜3-3、4-1〜4-3）、3-4 に1人参加
+  var day = { placements: {
+    'r3-1': { groupId: 's6' }, 'r3-2': { groupId: 's6' }, 'r3-3': { groupId: 's6' },
+    'r4-1': { groupId: 's6' }, 'r4-2': { groupId: 's6' }, 'r4-3': { groupId: 's6' },
+    'r3-4': { groupId: 'o1' }, 'r5-1': { groupId: 'p2' }, 'r5-2': { groupId: 'p2' }
+  }, unplaced: [] };
+  var v = C.inspect(layout, groups, day).filter(function (x) { return x.type === 'even-shared'; });
+  eq(v.map(function (x) { return x.groupId; }).join(','), 's6', '違反になる組');
+});
+
+test('大量テストの構成で、偶数の組の相席が出ない', function () {
+  for (var seed = 1; seed <= 24; seed++) {
+    var layoutType = seed % 3 === 0 ? '12x49' : '11x45';
+    var c = G.makeCase({
+      seed: seed, profile: seed % 2 ? '意地悪' : 'ふだん', spare: seed % 3, days: 1 + (seed % 2),
+      layoutType: layoutType, usable: S.buildLayout(layoutType).usableSeatCount
+    });
+    var r = S.assign({ layoutType: c.layoutType, groups: c.groups, days: c.days });
+    r.days.forEach(function (day, di) {
+      var bad = C.inspect(r.layout, r.groups, day).filter(function (v) { return v.type === 'even-shared'; });
+      eq(bad.map(function (v) { return v.message; }).join(' / '), '', c.id + ' の' + (di + 1) + '日目');
+    });
+  }
+});
+
+console.log('\n--- 10. 検査の追加（業務席・相席・相席の男女）と相席の当番 ---');
+
+test('checks.js の crew：業務席にお客様が座っていると違反になる', function () {
+  var layout = S.buildLayout('11x45');
+  var groups = [{ id: 'a', size: 1, order: 0 }];
+  var ok1 = { placements: { 'r1-1': { groupId: 'a' } }, unplaced: [] };
+  var ng1 = { placements: { 'r1-3': { groupId: 'a' } }, unplaced: [] };
+  eq(C.inspect(layout, groups, ok1).filter(function (v) { return v.type === 'crew'; }).length, 0, '業務席でない席');
+  eq(C.inspect(layout, groups, ng1).filter(function (v) { return v.type === 'crew'; }).length, 1, '業務席');
+});
+
+test('checks.js の sharing：空席に余裕があるのに相席があると違反になる', function () {
+  var layout = S.buildLayout('11x45');
+  // 1名×2組（奇数の組2つ）、空席41 → 余裕あり
+  var groups = [{ id: 'a', size: 1, order: 0 }, { id: 'b', size: 1, order: 1 }];
+  var together = { placements: { 'r2-1': { groupId: 'a' }, 'r2-2': { groupId: 'b' } }, unplaced: [] };
+  var apart = { placements: { 'r2-1': { groupId: 'a' }, 'r3-1': { groupId: 'b' } }, unplaced: [] };
+  eq(C.inspect(layout, groups, together).filter(function (v) { return v.type === 'sharing'; }).length, 1, '相席あり');
+  eq(C.inspect(layout, groups, apart).filter(function (v) { return v.type === 'sharing'; }).length, 0, '相席なし');
+});
+
+test('checks.js の mixed-gender：相席で男と女が並ぶと違反になる（未入力はどちらとも合う）', function () {
+  var layout = S.buildLayout('11x45');
+  var groups = [{ id: 'a', size: 1, order: 0 }, { id: 'b', size: 1, order: 1 }];
+  function pair(g1, g2) {
+    return { placements: { 'r2-1': { groupId: 'a', gender: g1 }, 'r2-2': { groupId: 'b', gender: g2 } }, unplaced: [] };
+  }
+  function count(day) { return C.inspect(layout, groups, day).filter(function (v) { return v.type === 'mixed-gender'; }).length; }
+  eq(count(pair('male', 'female')), 1, '男と女');
+  eq(count(pair('male', 'male')), 0, '男と男');
+  eq(count(pair('male', 'unknown')), 0, '男と未入力');
+  // 最後部の列は5席が地つづきなので、となりどうしが相席
+  var rear = { placements: { 'r11-2': { groupId: 'a', gender: 'female' }, 'r11-3': { groupId: 'b', gender: 'male' } }, unplaced: [] };
+  eq(count(rear), 1, '最後部の列のとなりどうし');
+});
+
+test('添乗員さんの入力・大量テストの構成で、業務席・余裕のある相席が出ない。相席の男女は、出るなら必ず警告が出る', function () {
+  // 相席の男女は、席がほぼ埋まっていて組み合わせがないとき、エンジンが「男女が並んでいます」の警告を出して残す
+  // （変更前からの動き。大量テストで変更前54件・今55件、すべて警告つき）
+  var data = require('./fixtures/field-2026-10-23.json');
+  var cases = data.cases.map(function (c) { return { id: c.id, layoutType: c.layoutType, groups: c.groups, days: c.days }; });
+  for (var seed = 1; seed <= 24; seed++) {
+    var layoutType = seed % 3 === 0 ? '12x49' : '11x45';
+    cases.push(G.makeCase({
+      seed: seed, profile: seed % 2 ? '意地悪' : 'ふだん', spare: seed % 3, days: 1 + (seed % 2),
+      layoutType: layoutType, usable: S.buildLayout(layoutType).usableSeatCount
+    }));
+  }
+  cases.forEach(function (c) {
+    var r = S.assign({ layoutType: c.layoutType, groups: c.groups, days: c.days });
+    r.days.forEach(function (day, di) {
+      var found = C.inspect(r.layout, r.groups, day);
+      var bad = found.filter(function (v) { return v.type === 'crew' || v.type === 'sharing'; });
+      eq(bad.map(function (v) { return v.message; }).join(' / '), '', c.id + ' の' + (di + 1) + '日目');
+      if (found.some(function (v) { return v.type === 'mixed-gender'; })) {
+        ok(day.warnings.some(function (w) { return w.type === 'mixed-gender'; }),
+          c.id + ' の' + (di + 1) + '日目：相席の男女があるのに警告が出ていない');
+      }
+    });
+  });
+});
+
+test('相席の当番：前の日に相席になった組に、続けて相席をお願いすることが減る（S4）', function () {
+  // 相席が避けられない構成（41名／43席、奇数の組が多い）。3日間で、2日つづけて相席になった組の数を数える
+  var sizes = [1, 1, 1, 3, 3, 3, 5, 5, 5, 3, 3, 1, 1, 3, 3];
+  var groups = sizes.map(function (n, i) { return group('g' + i, n); });
+  var r = S.assign({ layoutType: '11x45', groups: groups, days: 3 });
+  eq(r.sharing, true, '相席ありの構成になっていない');
+  function sharedIds(day) {
+    var out = {};
+    (day.shared || []).forEach(function (sh) { sh.groupIds.forEach(function (id) { out[id] = true; }); });
+    return out;
+  }
+  var everyDay = r.groups.filter(function (g) {
+    return r.days.every(function (day) { return sharedIds(day)[g.id]; });
+  });
+  ok(everyDay.length < r.groups.length, '全組が毎日相席になっている');
+  // 1日目に相席なしだった組のうち、少なくとも1組は2日目に相席の当番が回ってくる
+  var d1 = sharedIds(r.days[0]), d2 = sharedIds(r.days[1]);
+  ok(r.groups.some(function (g) { return !d1[g.id] && d2[g.id]; }), '相席の当番が回っていない');
 });
 
 console.log('\n============================================');

@@ -292,7 +292,7 @@ pre.json { background: #f6f8fa; border: 1px solid var(--line); padding: 8px; fon
       setTimeout(function () { step(i + 1); }, 0);
     }
 
-    var NAMES = { vertical: '縦並び', split: '泣き別れ', 'rear-middle': '最後部の真ん中' };
+    var NAMES = { vertical: '縦並び', split: '泣き別れ', 'pair-shape': '2名が横ペアでない', 'no-seat': '席未定', 'even-shared': '偶数の組の相席', crew: '業務席にお客様', sharing: '余裕があるのに相席', 'mixed-gender': '相席の男女', 'rear-middle': '最後部の真ん中' };
     function showSummary(final) {
       sum.innerHTML = '';
       sum.appendChild(el('span', '', (final ? '' : '流しています… ') + done + '/' + n + '件（' + ((Date.now() - t0) / 1000).toFixed(0) + '秒）'));

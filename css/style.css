@@ -264,6 +264,21 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: 2p
 .seat.is-empty .seat-mark { background: none; color: #aab4ba; font-weight: 400; }
 .seat.is-crew .seat-mark { display: none; }
 
+/* バスの外の「席未定」の枠。席と同じ大きさのマスを並べます */
+.unplaced {
+  margin: .6rem auto 0; padding: .5rem .6rem .7rem;
+  border: 2px dashed var(--error); border-radius: 8px; background: #fff7f7;
+}
+.unplaced-title { margin: 0 0 .4rem; font-size: .85rem; font-weight: 700; color: var(--error); }
+.unplaced-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, var(--seat-w));
+  grid-auto-rows: var(--seat-h);
+  gap: .34rem;
+}
+.unplaced-seat { padding-top: .45rem; }
+.unplaced-seat .seat-label { font-weight: 700; font-size: .72rem; }
+
 .seat.g0 { background-color: var(--c0-bg); border-color: var(--c0-line); --stripe: var(--c0-stripe); }
 .seat.g1 { background-color: var(--c1-bg); border-color: var(--c1-line); --stripe: var(--c1-stripe); }
 .seat.g2 { background-color: var(--c2-bg); border-color: var(--c2-line); --stripe: var(--c2-stripe); }

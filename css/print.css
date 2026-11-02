@@ -152,6 +152,12 @@
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
 
+  /* 席未定の枠も印刷する（バスの外に、席と同じ大きさのマスで） */
+  .unplaced { margin-top: 2mm; padding: 1.5mm 2mm 2mm; border: .5mm dashed #000; background: #fff !important; }
+  .unplaced-title { font-size: 8pt; color: #000; margin-bottom: 1mm; }
+  .unplaced-list { grid-template-columns: repeat(auto-fill, 30mm); grid-auto-rows: 13mm; gap: 1.2mm; }
+  .unplaced-seat .seat-label { font-size: 7.6pt; }
+
   .legend { font-size: 7.5pt; margin-top: 2mm; }
   .legend .lg-plain { background-color: #fff !important; --stripe: #b9c2c8; }
   .legend span { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
