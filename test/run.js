@@ -2213,7 +2213,8 @@ test('席未定の人が残っているあいだは、手で直したあとの�
 });
 
 test('最後部の列が空いたまま席未定にしない（添乗員さんの入力 1023-a）', function () {
-  // 最後部の列を開く条件（#2 の A12）。以前は3日目に、最後部の5席が空いたまま5名が席未定になっていた
+  // 最後部の列を開く条件（tetrisSolve() の②）。以前は出来ばえが同じだと最後部の列を開かず、
+  // 3日目に、最後部の5席が空いたまま5名が席未定になっていた
   var data = require('./fixtures/field-2026-10-23.json');
   var c = data.cases.filter(function (x) { return x.id === 'field-1023-a'; })[0];
   var r = S.assign({ layoutType: c.layoutType, groups: c.groups, days: c.days });
